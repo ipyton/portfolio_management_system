@@ -26,6 +26,12 @@ cd backend
 mvn spring-boot:run
 ```
 
+Every request must include the configured request key header:
+
+```text
+X-Request-Key: ef928c10-2da4-4ca6-9b49-dedc912d5b4c
+```
+
 ## Package
 
 ```bash
