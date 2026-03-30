@@ -33,6 +33,8 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 - `SCHEDULER_SHUTDOWN_WAIT_SECONDS`
 - `JOB_MARKET_DATA_REFRESH_ENABLED`
 - `JOB_MARKET_DATA_REFRESH_CRON`
+- `JOB_FX_RATE_REFRESH_ENABLED`
+- `JOB_FX_RATE_REFRESH_CRON`
 - `JOB_PORTFOLIO_NAV_SNAPSHOT_ENABLED`
 - `JOB_PORTFOLIO_NAV_SNAPSHOT_CRON`
 - `JOB_SYSTEM_CONFIG_REFRESH_ENABLED`
@@ -41,6 +43,13 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 - `YAHOO_FINANCE_BASE_URL`
 - `YAHOO_FINANCE_TIMEOUT`
 - `YAHOO_FINANCE_USER_AGENT`
+- `FX_ENABLED`
+- `FX_REPORTING_CURRENCY`
+- `FX_PERSIST_HISTORY`
+- `FX_STALE_AFTER`
+- `FX_TRACKED_CURRENCIES`
+- `FX_SYMBOL_USD`
+- `FX_SYMBOL_HKD`
 
 ## Run locally
 
@@ -70,6 +79,7 @@ The backend includes a Spring scheduling scaffold backed by a dedicated thread p
 Jobs currently wired:
 
 - `marketDataRefresh`: intended for `asset_price_daily` and other market-driven asset fields such as `asset_fund_detail.nav`
+- `fxRateRefresh`: syncs latest FX rates into `fx_rate_latest` and optionally `fx_rate_history`
 - `portfolioNavSnapshot`: intended for `portfolio_nav_daily`, computed from `holdings`, `cash_accounts`, and `asset_price_daily`
 - `systemConfigRefresh`: intended for externally sourced system parameters in `system_config`, such as risk-free rates
 
@@ -113,6 +123,16 @@ Optional query parameter:
 
 ```text
 benchmarkSymbol=SPX
+baseCurrency=CNY
+```
+
+`baseCurrency` controls how holdings, cash, and transaction totals are aggregated when FX data is available.
+
+## FX endpoint
+
+```bash
+GET /api/fx/latest
+GET /api/fx/latest?quoteCurrency=USD
 ```
 
 ## Asset search endpoint
@@ -126,3 +146,47 @@ Behavior:
 - Search `assets` and related detail tables in MySQL first
 - If a local asset is found, use its `symbol` to enrich the response with Yahoo Finance detail
 - If no local asset is found, resolve the symbol through Yahoo Finance search and return the external detail
+
+## API test scripts
+
+The repository includes reusable API test scripts under `backend/scripts/api-tests`.
+
+Included files:
+
+- `backend/scripts/api-tests/seed_test_data.sql`: inserts a deterministic user and stock asset for API testing
+- `backend/scripts/api-tests/cleanup_test_data.sql`: removes the seeded API test data
+- `backend/scripts/api-tests/smoke.sh`: lightweight health, auth, search, and preview checks
+- `backend/scripts/api-tests/full_regression.sh`: broader regression flow covering deposit, withdraw, idempotency, buy, sell, holdings, history, watchlist, and auth failure cases
+
+Seeded IDs used by the scripts:
+
+- `userId=900001`
+- `assetId=900101`
+- `symbol=AAPLTST`
+
+Recommended flow:
+
+1. Start the backend.
+2. Load `backend/scripts/api-tests/seed_test_data.sql` into your MySQL database.
+3. Run one of the scripts below.
+
+Example:
+
+```bash
+cd backend
+bash scripts/api-tests/smoke.sh
+bash scripts/api-tests/full_regression.sh
+```
+
+Useful environment overrides:
+
+- `BASE_URL`
+- `REQUEST_KEY`
+- `REQUEST_KEY_HEADER`
+- `TEST_USER_ID`
+- `TEST_ASSET_ID`
+- `TEST_SYMBOL`
+- `DEPOSIT_BIZ_ID`
+- `WITHDRAW_BIZ_ID`
+- `BUY_BIZ_ID`
+- `SELL_BIZ_ID`

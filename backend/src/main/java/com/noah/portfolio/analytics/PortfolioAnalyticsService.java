@@ -23,6 +23,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.noah.portfolio.fx.FxRateService;
+
 @Service
 @Transactional(readOnly = true)
 public class PortfolioAnalyticsService {
@@ -32,12 +34,14 @@ public class PortfolioAnalyticsService {
     private static final int SCALE = 6;
 
     private final JdbcTemplate jdbcTemplate;
+    private final FxRateService fxRateService;
 
-    public PortfolioAnalyticsService(JdbcTemplate jdbcTemplate) {
+    public PortfolioAnalyticsService(JdbcTemplate jdbcTemplate, FxRateService fxRateService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.fxRateService = fxRateService;
     }
 
-    public Map<String, Object> getAnalyticsSummary(String requestedBenchmarkSymbol) {
+    public Map<String, Object> getAnalyticsSummary(String requestedBenchmarkSymbol, String requestedBaseCurrency) {
         Long userId = resolveSingleUserId();
         if (userId == null) {
             return emptyResponse("No user data found.");
@@ -58,6 +62,7 @@ public class PortfolioAnalyticsService {
         String dominantRegion = resolveDominantRegion(holdings);
         String primaryBenchmarkSymbol = selectPrimaryBenchmark(requestedBenchmarkSymbol, benchmarkSeries.keySet(), dominantRegion);
         double riskFreeRate = fetchRiskFreeRate(resolveRiskFreeCurrency(dominantRegion));
+        String reportingCurrency = resolveReportingCurrency(requestedBaseCurrency);
 
         List<ReturnPoint> portfolioReturns = buildPortfolioReturnSeries(navPoints);
         List<Map<String, Object>> benchmarkComparisons = buildBenchmarkComparisons(
@@ -70,8 +75,9 @@ public class PortfolioAnalyticsService {
                 .findFirst()
                 .orElse(benchmarkComparisons.isEmpty() ? null : benchmarkComparisons.get(0));
 
-        double totalCash = resolveCashTotal(navPoints, cashBalances);
-        double totalHoldingMarketValue = resolveHoldingMarketValue(navPoints, holdings);
+        double totalCash = resolveCashTotal(navPoints, cashBalances, reportingCurrency);
+        double totalAvailableFunds = resolveAvailableFunds(cashBalances, reportingCurrency);
+        double totalHoldingMarketValue = resolveHoldingMarketValue(navPoints, holdings, reportingCurrency);
         double totalPortfolioValue = totalHoldingMarketValue + totalCash;
 
         LinkedHashMap<String, Object> response = new LinkedHashMap<>();
@@ -80,9 +86,17 @@ public class PortfolioAnalyticsService {
         response.put("asOf", endDate != null ? endDate.toString() : LocalDate.now().toString());
         response.put("performance", buildPerformanceSection(navPoints, portfolioReturns, benchmarkComparisons));
         response.put("risk", buildRiskSection(navPoints, portfolioReturns, primaryBenchmarkMetrics, riskFreeRate));
-        response.put("holdings", buildHoldingsSection(holdings, cashBalances, totalHoldingMarketValue, totalPortfolioValue));
-        response.put("trading", buildTradingSection(trades, navPoints, totalPortfolioValue));
-        response.put("realtime", buildRealtimeSection(navPoints, holdings, cashBalances, totalHoldingMarketValue, totalCash));
+        response.put("holdings", buildHoldingsSection(holdings, cashBalances, totalHoldingMarketValue, totalPortfolioValue, reportingCurrency));
+        response.put("trading", buildTradingSection(trades, navPoints, totalPortfolioValue, reportingCurrency));
+        response.put("realtime", buildRealtimeSection(
+                navPoints,
+                holdings,
+                cashBalances,
+                totalHoldingMarketValue,
+                totalCash,
+                totalAvailableFunds,
+                reportingCurrency
+        ));
         response.put("meta", buildMetaSection(
                 navPoints,
                 primaryBenchmarkMetrics,
@@ -90,7 +104,8 @@ public class PortfolioAnalyticsService {
                 benchmarkComparisons,
                 trades.size(),
                 holdings,
-                cashBalances
+                cashBalances,
+                reportingCurrency
         ));
         return response;
     }
@@ -140,31 +155,35 @@ public class PortfolioAnalyticsService {
             List<HoldingSnapshot> holdings,
             List<CashBalance> cashBalances,
             double totalHoldingMarketValue,
-            double totalPortfolioValue
+            double totalPortfolioValue,
+            String reportingCurrency
     ) {
         LinkedHashMap<String, Object> holdingsSection = new LinkedHashMap<>();
-        holdingsSection.put("assetClassDistribution", buildAssetClassDistribution(holdings, cashBalances, totalPortfolioValue));
+        holdingsSection.put("assetClassDistribution", buildAssetClassDistribution(holdings, cashBalances, totalPortfolioValue, reportingCurrency));
         holdingsSection.put("industryDistribution", buildDistribution(
                 holdings,
                 HoldingSnapshot::industry,
-                totalHoldingMarketValue
+                totalHoldingMarketValue,
+                reportingCurrency
         ));
         holdingsSection.put("regionDistribution", buildDistribution(
                 holdings,
                 HoldingSnapshot::region,
-                totalHoldingMarketValue
+                totalHoldingMarketValue,
+                reportingCurrency
         ));
-        holdingsSection.put("concentrationRisk", buildConcentrationRisk(holdings, totalHoldingMarketValue));
+        holdingsSection.put("concentrationRisk", buildConcentrationRisk(holdings, totalHoldingMarketValue, reportingCurrency));
         return holdingsSection;
     }
 
     private Map<String, Object> buildTradingSection(
             List<TradeRecord> trades,
             List<NavPoint> navPoints,
-            double currentPortfolioValue
+            double currentPortfolioValue,
+            String reportingCurrency
     ) {
         LinkedHashMap<String, Object> trading = new LinkedHashMap<>();
-        double totalTradeAmount = sum(trades.stream().map(TradeRecord::amount).toList());
+        double totalTradeAmount = sum(trades.stream().map(trade -> tradeAmount(trade, reportingCurrency)).toList());
         double averagePortfolioValue = navPoints.isEmpty()
                 ? currentPortfolioValue
                 : navPoints.stream().mapToDouble(NavPoint::totalValue).average().orElse(currentPortfolioValue);
@@ -172,10 +191,11 @@ public class PortfolioAnalyticsService {
 
         trading.put("turnoverRate", turnoverRate == null ? null : round(turnoverRate));
         trading.put("transactionAmount", round(totalTradeAmount));
-        trading.put("totalFees", round(sum(trades.stream().map(TradeRecord::fee).toList())));
+        trading.put("totalFees", round(sum(trades.stream().map(trade -> tradeFee(trade, reportingCurrency)).toList())));
+        trading.put("reportingCurrency", reportingCurrency);
         trading.put("tradeCount", trades.size());
         trading.put("buySellRecords", trades.stream()
-                .map(this::toTradeRecordMap)
+                .map(trade -> toTradeRecordMap(trade, reportingCurrency))
                 .toList());
         return trading;
     }
@@ -185,22 +205,29 @@ public class PortfolioAnalyticsService {
             List<HoldingSnapshot> holdings,
             List<CashBalance> cashBalances,
             double totalHoldingMarketValue,
-            double totalCash
+            double totalCash,
+            double totalAvailableFunds,
+            String reportingCurrency
     ) {
         LinkedHashMap<String, Object> realtime = new LinkedHashMap<>();
         realtime.put("todayPnl", computeTodayPnl(navPoints));
         realtime.put("holdingMarketValue", round(totalHoldingMarketValue));
         realtime.put("cashBalance", round(totalCash));
-        realtime.put("availableFunds", round(totalCash));
+        realtime.put("availableFunds", round(totalAvailableFunds));
+        realtime.put("reportingCurrency", reportingCurrency);
         realtime.put("cashByCurrency", cashBalances.stream()
                 .map(balance -> orderedMap(
                         "currency", balance.currency(),
-                        "balance", round(balance.balance())
+                        "balance", round(balance.balance()),
+                        "availableBalance", round(balance.availableBalance()),
+                        "frozenBalance", round(balance.frozenBalance()),
+                        "reportingCurrencyBalance", round(cashBalanceValue(balance, reportingCurrency)),
+                        "reportingCurrencyAvailableBalance", round(cashAvailableValue(balance, reportingCurrency))
                 ))
                 .toList());
         realtime.put("holdings", holdings.stream()
                 .sorted(Comparator.comparing(HoldingSnapshot::marketValue).reversed())
-                .map(holding -> toRealtimeHoldingMap(holding, totalHoldingMarketValue))
+                .map(holding -> toRealtimeHoldingMap(holding, totalHoldingMarketValue, reportingCurrency))
                 .toList());
         return realtime;
     }
@@ -212,11 +239,13 @@ public class PortfolioAnalyticsService {
             List<Map<String, Object>> benchmarkComparisons,
             int tradeCount,
             List<HoldingSnapshot> holdings,
-            List<CashBalance> cashBalances
+            List<CashBalance> cashBalances,
+            String reportingCurrency
     ) {
         LinkedHashMap<String, Object> meta = new LinkedHashMap<>();
         LocalDate startDate = navPoints.isEmpty() ? null : navPoints.get(0).navDate();
         LocalDate endDate = navPoints.isEmpty() ? null : navPoints.get(navPoints.size() - 1).navDate();
+        Instant fxAsOf = fxRateService.latestAsOf();
 
         meta.put("startDate", startDate == null ? null : startDate.toString());
         meta.put("endDate", endDate == null ? null : endDate.toString());
@@ -225,15 +254,20 @@ public class PortfolioAnalyticsService {
         meta.put("primaryBenchmark", primaryBenchmarkMetrics == null ? null : primaryBenchmarkMetrics.get("symbol"));
         meta.put("dominantRegion", dominantRegion);
         meta.put("benchmarkCount", benchmarkComparisons.size());
+        meta.put("reportingCurrency", reportingCurrency);
+        meta.put("fxAsOf", fxAsOf == null ? null : fxAsOf.toString());
+        meta.put("fxStale", fxAsOf == null || fxRateService.isStale(fxAsOf));
         meta.put("generatedAt", Instant.now().toString());
-        meta.put("warnings", buildWarnings(navPoints, holdings, cashBalances));
+        meta.put("warnings", buildWarnings(navPoints, holdings, cashBalances, reportingCurrency, fxAsOf));
         return meta;
     }
 
     private List<String> buildWarnings(
             List<NavPoint> navPoints,
             List<HoldingSnapshot> holdings,
-            List<CashBalance> cashBalances
+            List<CashBalance> cashBalances,
+            String reportingCurrency,
+            Instant fxAsOf
     ) {
         LinkedHashSet<String> warnings = new LinkedHashSet<>();
         if (navPoints.isEmpty()) {
@@ -242,9 +276,16 @@ public class PortfolioAnalyticsService {
         if (holdings.stream().anyMatch(holding -> holding.latestPrice() == null)) {
             warnings.add("Some holdings do not have latest market prices. Avg cost was used as fallback price.");
         }
-        if (holdings.stream().map(HoldingSnapshot::currency).distinct().count() > 1
-                || cashBalances.stream().map(CashBalance::currency).distinct().count() > 1) {
-            warnings.add("The schema does not include FX rates. Cross-currency totals assume values are already normalized.");
+        if (hasCrossCurrencyExposure(holdings, cashBalances, reportingCurrency)) {
+            if (fxAsOf == null) {
+                warnings.add("Cross-currency exposure detected, but no FX snapshot is available. Raw amounts were used as fallback.");
+            } else if (fxRateService.isStale(fxAsOf)) {
+                warnings.add("FX snapshot is stale. Converted holdings and cash may lag the market.");
+            }
+        }
+        List<String> missingCurrencies = missingFxCurrencies(holdings, cashBalances, reportingCurrency);
+        if (!missingCurrencies.isEmpty()) {
+            warnings.add("Missing FX rate for currencies: " + String.join(", ", missingCurrencies) + ". Raw amounts were used as fallback.");
         }
         return new ArrayList<>(warnings);
     }
@@ -252,11 +293,12 @@ public class PortfolioAnalyticsService {
     private List<Map<String, Object>> buildAssetClassDistribution(
             List<HoldingSnapshot> holdings,
             List<CashBalance> cashBalances,
-            double totalPortfolioValue
+            double totalPortfolioValue,
+            String reportingCurrency
     ) {
         Map<String, Double> byClass = new LinkedHashMap<>();
-        holdings.forEach(holding -> byClass.merge(holding.assetType(), holding.marketValue(), Double::sum));
-        double cashTotal = sum(cashBalances.stream().map(CashBalance::balance).toList());
+        holdings.forEach(holding -> byClass.merge(holding.assetType(), holdingMarketValue(holding, reportingCurrency), Double::sum));
+        double cashTotal = sum(cashBalances.stream().map(balance -> cashBalanceValue(balance, reportingCurrency)).toList());
         if (!almostZero(cashTotal)) {
             byClass.merge("CASH", cashTotal, Double::sum);
         }
@@ -274,7 +316,8 @@ public class PortfolioAnalyticsService {
     private List<Map<String, Object>> buildDistribution(
             List<HoldingSnapshot> holdings,
             ValueExtractor extractor,
-            double totalHoldingMarketValue
+            double totalHoldingMarketValue,
+            String reportingCurrency
     ) {
         Map<String, Double> distribution = new LinkedHashMap<>();
         holdings.forEach(holding -> {
@@ -282,7 +325,7 @@ public class PortfolioAnalyticsService {
             if (!StringUtils.hasText(key)) {
                 key = "UNKNOWN";
             }
-            distribution.merge(key, holding.marketValue(), Double::sum);
+            distribution.merge(key, holdingMarketValue(holding, reportingCurrency), Double::sum);
         });
 
         return distribution.entrySet().stream()
@@ -295,23 +338,27 @@ public class PortfolioAnalyticsService {
                 .toList();
     }
 
-    private Map<String, Object> buildConcentrationRisk(List<HoldingSnapshot> holdings, double totalHoldingMarketValue) {
+    private Map<String, Object> buildConcentrationRisk(
+            List<HoldingSnapshot> holdings,
+            double totalHoldingMarketValue,
+            String reportingCurrency
+    ) {
         LinkedHashMap<String, Object> concentration = new LinkedHashMap<>();
         List<HoldingSnapshot> sorted = holdings.stream()
-                .sorted(Comparator.comparing(HoldingSnapshot::marketValue).reversed())
+                .sorted(Comparator.comparing((HoldingSnapshot holding) -> holdingMarketValue(holding, reportingCurrency)).reversed())
                 .toList();
 
         double herfindahlIndex = sorted.stream()
                 .mapToDouble(holding -> {
-                    double w = totalHoldingMarketValue <= EPSILON ? 0 : holding.marketValue() / totalHoldingMarketValue;
+                    double w = totalHoldingMarketValue <= EPSILON ? 0 : holdingMarketValue(holding, reportingCurrency) / totalHoldingMarketValue;
                     return w * w;
                 })
                 .sum();
 
-        concentration.put("largestHoldingWeight", sorted.isEmpty() ? null : weight(sorted.get(0).marketValue(), totalHoldingMarketValue));
+        concentration.put("largestHoldingWeight", sorted.isEmpty() ? null : weight(holdingMarketValue(sorted.get(0), reportingCurrency), totalHoldingMarketValue));
         concentration.put("top3Weight", round(sorted.stream()
                 .limit(3)
-                .mapToDouble(HoldingSnapshot::marketValue)
+                .mapToDouble(holding -> holdingMarketValue(holding, reportingCurrency))
                 .sum() / (totalHoldingMarketValue <= EPSILON ? 1 : totalHoldingMarketValue)));
         concentration.put("herfindahlIndex", sorted.isEmpty() ? null : round(herfindahlIndex));
         concentration.put("topHoldings", sorted.stream()
@@ -320,8 +367,8 @@ public class PortfolioAnalyticsService {
                         "symbol", holding.symbol(),
                         "name", holding.name(),
                         "assetType", holding.assetType(),
-                        "marketValue", round(holding.marketValue()),
-                        "weight", weight(holding.marketValue(), totalHoldingMarketValue)
+                        "marketValue", round(holdingMarketValue(holding, reportingCurrency)),
+                        "weight", weight(holdingMarketValue(holding, reportingCurrency), totalHoldingMarketValue)
                 ))
                 .toList());
         return concentration;
@@ -373,36 +420,43 @@ public class PortfolioAnalyticsService {
                 .toList();
     }
 
-    private Map<String, Object> toTradeRecordMap(TradeRecord trade) {
+    private Map<String, Object> toTradeRecordMap(TradeRecord trade, String reportingCurrency) {
         return orderedMap(
                 "tradeId", trade.tradeId(),
                 "symbol", trade.symbol(),
                 "assetName", trade.assetName(),
+                "currency", trade.currency(),
                 "tradeType", trade.tradeType(),
                 "quantity", round(trade.quantity()),
                 "price", round(trade.price()),
                 "amount", round(trade.amount()),
+                "reportingCurrencyAmount", round(tradeAmount(trade, reportingCurrency)),
                 "fee", round(trade.fee()),
+                "reportingCurrencyFee", round(tradeFee(trade, reportingCurrency)),
                 "tradedAt", trade.tradedAt().toString(),
                 "note", trade.note()
         );
     }
 
-    private Map<String, Object> toRealtimeHoldingMap(HoldingSnapshot holding, double totalHoldingMarketValue) {
+    private Map<String, Object> toRealtimeHoldingMap(HoldingSnapshot holding, double totalHoldingMarketValue, String reportingCurrency) {
+        double convertedMarketValue = holdingMarketValue(holding, reportingCurrency);
         return orderedMap(
                 "symbol", holding.symbol(),
                 "name", holding.name(),
                 "assetType", holding.assetType(),
                 "currency", holding.currency(),
+                "reportingCurrency", reportingCurrency,
                 "region", holding.region(),
                 "industry", holding.industry(),
                 "quantity", round(holding.quantity()),
                 "avgCost", round(holding.avgCost()),
                 "latestPrice", holding.latestPrice() == null ? null : round(holding.latestPrice()),
                 "latestPriceDate", holding.latestPriceDate() == null ? null : holding.latestPriceDate().toString(),
-                "marketValue", round(holding.marketValue()),
-                "unrealizedPnl", round(holding.unrealizedPnl()),
-                "weight", weight(holding.marketValue(), totalHoldingMarketValue)
+                "nativeMarketValue", round(holding.marketValue()),
+                "nativeUnrealizedPnl", round(holding.unrealizedPnl()),
+                "marketValue", round(convertedMarketValue),
+                "unrealizedPnl", round(holdingUnrealizedPnl(holding, reportingCurrency)),
+                "weight", weight(convertedMarketValue, totalHoldingMarketValue)
         );
     }
 
@@ -493,14 +547,16 @@ public class PortfolioAnalyticsService {
 
     private List<CashBalance> fetchCashBalances(Long userId) {
         return jdbcTemplate.query("""
-                        SELECT currency, balance
+                        SELECT currency, balance, available_balance, frozen_balance
                         FROM cash_accounts
                         WHERE user_id = ?
                         ORDER BY currency
                         """,
                 (rs, rowNum) -> new CashBalance(
                         rs.getString("currency"),
-                        getDouble(rs, "balance")
+                        getDouble(rs, "balance"),
+                        getDouble(rs, "available_balance"),
+                        getDouble(rs, "frozen_balance")
                 ),
                 userId
         );
@@ -512,6 +568,7 @@ public class PortfolioAnalyticsService {
                             th.id,
                             a.symbol,
                             a.name,
+                            a.currency,
                             th.trade_type,
                             th.quantity,
                             th.price,
@@ -529,6 +586,7 @@ public class PortfolioAnalyticsService {
                         rs.getLong("id"),
                         rs.getString("symbol"),
                         rs.getString("name"),
+                        rs.getString("currency"),
                         rs.getString("trade_type"),
                         getDouble(rs, "quantity"),
                         getDouble(rs, "price"),
@@ -582,18 +640,90 @@ public class PortfolioAnalyticsService {
         return values.isEmpty() ? 0.0 : values.get(0);
     }
 
-    private double resolveCashTotal(List<NavPoint> navPoints, List<CashBalance> cashBalances) {
+    private double resolveCashTotal(List<NavPoint> navPoints, List<CashBalance> cashBalances, String reportingCurrency) {
         if (!cashBalances.isEmpty()) {
-            return sum(cashBalances.stream().map(CashBalance::balance).toList());
+            return sum(cashBalances.stream().map(balance -> cashBalanceValue(balance, reportingCurrency)).toList());
         }
         return navPoints.isEmpty() ? 0.0 : navPoints.get(navPoints.size() - 1).cash();
     }
 
-    private double resolveHoldingMarketValue(List<NavPoint> navPoints, List<HoldingSnapshot> holdings) {
+    private double resolveAvailableFunds(List<CashBalance> cashBalances, String reportingCurrency) {
+        if (cashBalances.isEmpty()) {
+            return 0.0;
+        }
+        return sum(cashBalances.stream().map(balance -> cashAvailableValue(balance, reportingCurrency)).toList());
+    }
+
+    private double resolveHoldingMarketValue(List<NavPoint> navPoints, List<HoldingSnapshot> holdings, String reportingCurrency) {
         if (!holdings.isEmpty()) {
-            return sum(holdings.stream().map(HoldingSnapshot::marketValue).toList());
+            return sum(holdings.stream().map(holding -> holdingMarketValue(holding, reportingCurrency)).toList());
         }
         return navPoints.isEmpty() ? 0.0 : navPoints.get(navPoints.size() - 1).holdingValue();
+    }
+
+    private String resolveReportingCurrency(String requestedBaseCurrency) {
+        return StringUtils.hasText(requestedBaseCurrency)
+                ? requestedBaseCurrency.trim().toUpperCase()
+                : fxRateService.reportingCurrency();
+    }
+
+    private double holdingMarketValue(HoldingSnapshot holding, String reportingCurrency) {
+        return convertOrFallback(holding.marketValue(), holding.currency(), reportingCurrency);
+    }
+
+    private double holdingUnrealizedPnl(HoldingSnapshot holding, String reportingCurrency) {
+        return convertOrFallback(holding.unrealizedPnl(), holding.currency(), reportingCurrency);
+    }
+
+    private double cashBalanceValue(CashBalance cashBalance, String reportingCurrency) {
+        return convertOrFallback(cashBalance.balance(), cashBalance.currency(), reportingCurrency);
+    }
+
+    private double cashAvailableValue(CashBalance cashBalance, String reportingCurrency) {
+        return convertOrFallback(cashBalance.availableBalance(), cashBalance.currency(), reportingCurrency);
+    }
+
+    private double tradeAmount(TradeRecord trade, String reportingCurrency) {
+        return convertOrFallback(trade.amount(), trade.currency(), reportingCurrency);
+    }
+
+    private double tradeFee(TradeRecord trade, String reportingCurrency) {
+        return convertOrFallback(trade.fee(), trade.currency(), reportingCurrency);
+    }
+
+    private double convertOrFallback(double amount, String fromCurrency, String reportingCurrency) {
+        return fxRateService.convert(BigDecimal.valueOf(amount), fromCurrency, reportingCurrency)
+                .map(BigDecimal::doubleValue)
+                .orElse(amount);
+    }
+
+    private boolean hasCrossCurrencyExposure(
+            List<HoldingSnapshot> holdings,
+            List<CashBalance> cashBalances,
+            String reportingCurrency
+    ) {
+        return holdings.stream().anyMatch(holding -> !reportingCurrency.equalsIgnoreCase(holding.currency()))
+                || cashBalances.stream().anyMatch(balance -> !reportingCurrency.equalsIgnoreCase(balance.currency()));
+    }
+
+    private List<String> missingFxCurrencies(
+            List<HoldingSnapshot> holdings,
+            List<CashBalance> cashBalances,
+            String reportingCurrency
+    ) {
+        LinkedHashSet<String> currencies = new LinkedHashSet<>();
+        holdings.stream()
+                .map(HoldingSnapshot::currency)
+                .filter(currency -> !reportingCurrency.equalsIgnoreCase(currency))
+                .forEach(currencies::add);
+        cashBalances.stream()
+                .map(CashBalance::currency)
+                .filter(currency -> !reportingCurrency.equalsIgnoreCase(currency))
+                .forEach(currencies::add);
+
+        return currencies.stream()
+                .filter(currency -> fxRateService.getConversionRate(currency, reportingCurrency).isEmpty())
+                .toList();
     }
 
     private List<ReturnPoint> buildPortfolioReturnSeries(List<NavPoint> navPoints) {
@@ -795,6 +925,7 @@ public class PortfolioAnalyticsService {
     }
 
     private Map<String, Object> emptyResponse(String message) {
+        String reportingCurrency = fxRateService.reportingCurrency();
         LinkedHashMap<String, Object> response = new LinkedHashMap<>();
         response.put("userId", null);
         response.put("hasData", false);
@@ -830,6 +961,7 @@ public class PortfolioAnalyticsService {
                 "turnoverRate", null,
                 "transactionAmount", 0,
                 "totalFees", 0,
+                "reportingCurrency", reportingCurrency,
                 "tradeCount", 0,
                 "buySellRecords", List.of()
         ));
@@ -838,6 +970,7 @@ public class PortfolioAnalyticsService {
                 "holdingMarketValue", 0,
                 "cashBalance", 0,
                 "availableFunds", 0,
+                "reportingCurrency", reportingCurrency,
                 "cashByCurrency", List.of(),
                 "holdings", List.of()
         ));
@@ -849,6 +982,9 @@ public class PortfolioAnalyticsService {
                 "primaryBenchmark", null,
                 "dominantRegion", null,
                 "benchmarkCount", 0,
+                "reportingCurrency", reportingCurrency,
+                "fxAsOf", null,
+                "fxStale", true,
                 "generatedAt", Instant.now().toString(),
                 "warnings", List.of(message)
         ));
@@ -962,13 +1098,19 @@ public class PortfolioAnalyticsService {
     ) {
     }
 
-    private record CashBalance(String currency, double balance) {
+    private record CashBalance(
+            String currency,
+            double balance,
+            double availableBalance,
+            double frozenBalance
+    ) {
     }
 
     private record TradeRecord(
             long tradeId,
             String symbol,
             String assetName,
+            String currency,
             String tradeType,
             double quantity,
             double price,

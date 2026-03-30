@@ -44,6 +44,9 @@ scheduler:
     market-data-refresh:
       enabled: ${JOB_MARKET_DATA_REFRESH_ENABLED:true}
       cron: ${JOB_MARKET_DATA_REFRESH_CRON:0 0 22 * * MON-FRI}
+    fx-rate-refresh:
+      enabled: ${JOB_FX_RATE_REFRESH_ENABLED:true}
+      cron: ${JOB_FX_RATE_REFRESH_CRON:0 */5 * * * *}
     portfolio-nav-snapshot:
       enabled: ${JOB_PORTFOLIO_NAV_SNAPSHOT_ENABLED:true}
       cron: ${JOB_PORTFOLIO_NAV_SNAPSHOT_CRON:0 10 22 * * MON-FRI}
@@ -55,3 +58,12 @@ yahoo-finance:
   base-url: ${YAHOO_FINANCE_BASE_URL:https://query1.finance.yahoo.com}
   timeout: ${YAHOO_FINANCE_TIMEOUT:5s}
   user-agent: ${YAHOO_FINANCE_USER_AGENT:portfolio-management-system/1.0}
+fx:
+  enabled: ${FX_ENABLED:true}
+  reporting-currency: ${FX_REPORTING_CURRENCY:CNY}
+  persist-history: ${FX_PERSIST_HISTORY:true}
+  stale-after: ${FX_STALE_AFTER:30m}
+  tracked-currencies: ${FX_TRACKED_CURRENCIES:CNY,USD,HKD}
+  symbols:
+    USD: ${FX_SYMBOL_USD:USDCNY=X}
+    HKD: ${FX_SYMBOL_HKD:HKDCNY=X}

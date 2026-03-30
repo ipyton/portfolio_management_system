@@ -112,6 +112,12 @@ public class YahooFinanceClient {
         }
     }
 
+    public Optional<BigDecimal> fetchRegularMarketPrice(String symbol) {
+        return fetchDetail(symbol)
+                .map(YahooFinanceDetail::regularMarketPrice)
+                .filter(price -> price != null);
+    }
+
     Optional<YahooFinanceDetail> buildDetail(String symbol, JsonNode quoteRoot, JsonNode summaryRoot) {
         JsonNode quote = findQuoteNode(quoteRoot.path("quoteResponse").path("result"), symbol);
         JsonNode summaryResult = firstArrayElement(summaryRoot.path("quoteSummary").path("result"));

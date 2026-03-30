@@ -11,6 +11,7 @@ public record TradeRequest(
         @NotNull Long assetId,
         @NotNull @DecimalMin(value = "0.000001") BigDecimal quantity,
         @NotNull @DecimalMin(value = "0.000001") BigDecimal price,
+        @Size(max = 64) String bizId,
         @DecimalMin(value = "0.0") BigDecimal fee,
         @Size(max = 255) String note
 ) {

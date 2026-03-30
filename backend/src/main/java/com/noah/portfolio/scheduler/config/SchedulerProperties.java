@@ -64,6 +64,9 @@ public class SchedulerProperties {
         private final Job marketDataRefresh = new Job(true, "0 0 22 * * MON-FRI");
 
         @Valid
+        private final Job fxRateRefresh = new Job(true, "0 */5 * * * *");
+
+        @Valid
         private final Job portfolioNavSnapshot = new Job(true, "0 10 22 * * MON-FRI");
 
         @Valid
@@ -71,6 +74,10 @@ public class SchedulerProperties {
 
         public Job getMarketDataRefresh() {
             return marketDataRefresh;
+        }
+
+        public Job getFxRateRefresh() {
+            return fxRateRefresh;
         }
 
         public Job getPortfolioNavSnapshot() {

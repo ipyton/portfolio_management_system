@@ -26,8 +26,10 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "Get portfolio analytics", description = "Returns performance, risk, holdings, trading, and benchmark comparison metrics.")
     public Map<String, Object> getAnalytics(
             @Parameter(description = "Optional benchmark symbol", example = "SPX")
-            @RequestParam(required = false) String benchmarkSymbol
+            @RequestParam(required = false) String benchmarkSymbol,
+            @Parameter(description = "Optional reporting currency for holdings and cash aggregation", example = "CNY")
+            @RequestParam(required = false) String baseCurrency
     ) {
-        return portfolioAnalyticsService.getAnalyticsSummary(benchmarkSymbol);
+        return portfolioAnalyticsService.getAnalyticsSummary(benchmarkSymbol, baseCurrency);
     }
 }

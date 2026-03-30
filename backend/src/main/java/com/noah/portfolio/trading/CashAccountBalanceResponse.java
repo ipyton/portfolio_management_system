@@ -13,6 +13,8 @@ public record CashAccountBalanceResponse(
 record CashAccountBalanceItem(
         Long cashAccountId,
         String currency,
-        BigDecimal balance
+        BigDecimal balance,
+        BigDecimal availableBalance,
+        BigDecimal frozenBalance
 ) {
 }

@@ -11,6 +11,7 @@ public record CashAccountTransferRequest(
         @NotNull Long userId,
         @NotBlank @Size(max = 10) String currency,
         @NotNull @DecimalMin(value = "0.000001") BigDecimal amount,
+        @Size(max = 64) String bizId,
         @Size(max = 255) String note
 ) {
 }

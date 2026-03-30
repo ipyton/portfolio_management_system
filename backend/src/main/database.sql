@@ -114,6 +114,36 @@ CREATE TABLE asset_price_daily (
 
 
 -- ================================================================
+-- 4.1 汇率最新快照与历史表
+-- ================================================================
+CREATE TABLE fx_rate_latest (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    base_currency  CHAR(10)        NOT NULL COMMENT '基础币种，如 USD',
+    quote_currency CHAR(10)        NOT NULL COMMENT '计价币种，如 CNY',
+    rate           DECIMAL(18, 8)  NOT NULL COMMENT '1 base_currency = rate quote_currency',
+    source         VARCHAR(50)     NOT NULL COMMENT '汇率来源，如 YAHOO_FINANCE',
+    symbol         VARCHAR(50)     COMMENT '上游行情符号，如 USDCNY=X',
+    as_of          TIMESTAMP       NOT NULL COMMENT '上游数据时间或同步时间',
+    updated_at     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_fx_latest_pair (base_currency, quote_currency),
+    INDEX idx_fx_latest_as_of (as_of)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE fx_rate_history (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    base_currency  CHAR(10)        NOT NULL,
+    quote_currency CHAR(10)        NOT NULL,
+    rate           DECIMAL(18, 8)  NOT NULL,
+    source         VARCHAR(50)     NOT NULL,
+    symbol         VARCHAR(50),
+    as_of          TIMESTAMP       NOT NULL,
+    created_at     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_fx_history_pair_as_of (base_currency, quote_currency, as_of),
+    INDEX idx_fx_history_pair_time (base_currency, quote_currency, as_of)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ================================================================
 -- 5. 持仓表
 -- ================================================================
 CREATE TABLE holdings (
@@ -135,14 +165,19 @@ CREATE TABLE holdings (
 -- ================================================================
 CREATE TABLE trade_history (
     id         BIGINT UNSIGNED     AUTO_INCREMENT PRIMARY KEY,
+    biz_id     VARCHAR(64)         NOT NULL COMMENT '业务幂等号',
     holding_id BIGINT UNSIGNED     NOT NULL,
     trade_type ENUM('BUY','SELL')  NOT NULL,
+    status     ENUM('PENDING','SUCCESS','FAILED','CANCELED') NOT NULL DEFAULT 'SUCCESS' COMMENT '交易状态',
     quantity   DECIMAL(18, 6)      NOT NULL COMMENT '交易数量',
     price      DECIMAL(18, 6)      NOT NULL COMMENT '成交价格',
     amount     DECIMAL(18, 6)      NOT NULL COMMENT '成交金额 = quantity × price',
     fee        DECIMAL(18, 6)      NOT NULL DEFAULT 0 COMMENT '手续费',
+    holding_quantity_after DECIMAL(18, 6) NOT NULL COMMENT '交易后持仓数量',
+    holding_avg_cost_after DECIMAL(18, 6) NOT NULL COMMENT '交易后平均成本',
     traded_at  TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     note       VARCHAR(255),
+    UNIQUE KEY uq_trade_biz_id (biz_id),
     INDEX idx_holding_id (holding_id),
     INDEX idx_traded_at  (traded_at),
     CONSTRAINT fk_history_holding FOREIGN KEY (holding_id) REFERENCES holdings (id) ON DELETE CASCADE
@@ -168,11 +203,13 @@ CREATE TABLE watchlist (
 -- 8. 现金账户表
 -- ================================================================
 CREATE TABLE cash_accounts (
-    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id    BIGINT UNSIGNED NOT NULL,
-    currency   CHAR(10)        NOT NULL DEFAULT 'USD',
-    balance    DECIMAL(18, 6)  NOT NULL DEFAULT 0 COMMENT '当前余额',
-    updated_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id           BIGINT UNSIGNED NOT NULL,
+    currency          CHAR(10)        NOT NULL DEFAULT 'USD',
+    balance           DECIMAL(18, 6)  NOT NULL DEFAULT 0 COMMENT '总余额 = 可用余额 + 冻结余额',
+    available_balance DECIMAL(18, 6)  NOT NULL DEFAULT 0 COMMENT '可用余额',
+    frozen_balance    DECIMAL(18, 6)  NOT NULL DEFAULT 0 COMMENT '冻结余额',
+    updated_at        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_user_currency (user_id, currency),
     CONSTRAINT fk_cash_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -182,15 +219,20 @@ CREATE TABLE cash_accounts (
 -- 9. 现金流水表
 -- ================================================================
 CREATE TABLE cash_transactions (
-    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id       BIGINT UNSIGNED NOT NULL,
-    currency      CHAR(10)        NOT NULL DEFAULT 'USD',
-    tx_type       ENUM('DEPOSIT','WITHDRAW','BUY','SELL','FEE','DIVIDEND') NOT NULL,
-    amount        DECIMAL(18, 6)  NOT NULL COMMENT '正数=入账，负数=扣款',
-    balance_after DECIMAL(18, 6)  NOT NULL COMMENT '交易后余额',
-    ref_trade_id  BIGINT UNSIGNED COMMENT '关联 trade_history.id',
-    occurred_at   TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    note          VARCHAR(255),
+    id                     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    biz_id                 VARCHAR(64)    NOT NULL COMMENT '业务幂等号',
+    user_id                BIGINT UNSIGNED NOT NULL,
+    currency               CHAR(10)        NOT NULL DEFAULT 'USD',
+    tx_type                ENUM('DEPOSIT','WITHDRAW','BUY','SELL','FEE','DIVIDEND') NOT NULL,
+    status                 ENUM('PENDING','SUCCESS','FAILED','CANCELED') NOT NULL DEFAULT 'SUCCESS' COMMENT '流水状态',
+    amount                 DECIMAL(18, 6)  NOT NULL COMMENT '正数=入账，负数=扣款',
+    balance_after          DECIMAL(18, 6)  NOT NULL COMMENT '交易后总余额',
+    available_balance_after DECIMAL(18, 6) NOT NULL COMMENT '交易后可用余额',
+    frozen_balance_after   DECIMAL(18, 6)  NOT NULL COMMENT '交易后冻结余额',
+    ref_trade_id           BIGINT UNSIGNED COMMENT '关联 trade_history.id',
+    occurred_at            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    note                   VARCHAR(255),
+    UNIQUE KEY uq_cash_tx_biz_id (biz_id),
     INDEX idx_user_id     (user_id),
     INDEX idx_occurred_at (occurred_at),
     CONSTRAINT fk_cash_tx_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE

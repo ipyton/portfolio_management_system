@@ -25,6 +25,9 @@ public class CashTransactionEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "biz_id", nullable = false, length = 64)
+    private String bizId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private UserEntity user;
@@ -36,11 +39,21 @@ public class CashTransactionEntity {
     @Column(name = "tx_type", nullable = false)
     private CashTransactionType txType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OperationStatus status;
+
     @Column(nullable = false, precision = 18, scale = 6)
     private BigDecimal amount;
 
     @Column(name = "balance_after", nullable = false, precision = 18, scale = 6)
     private BigDecimal balanceAfter;
+
+    @Column(name = "available_balance_after", nullable = false, precision = 18, scale = 6)
+    private BigDecimal availableBalanceAfter;
+
+    @Column(name = "frozen_balance_after", nullable = false, precision = 18, scale = 6)
+    private BigDecimal frozenBalanceAfter;
 
     @Column(name = "ref_trade_id")
     private Long refTradeId;
@@ -55,25 +68,37 @@ public class CashTransactionEntity {
     }
 
     public CashTransactionEntity(
+            String bizId,
             UserEntity user,
             String currency,
             CashTransactionType txType,
+            OperationStatus status,
             BigDecimal amount,
             BigDecimal balanceAfter,
+            BigDecimal availableBalanceAfter,
+            BigDecimal frozenBalanceAfter,
             Long refTradeId,
             String note
     ) {
+        this.bizId = bizId;
         this.user = user;
         this.currency = currency;
         this.txType = txType;
+        this.status = status;
         this.amount = amount;
         this.balanceAfter = balanceAfter;
+        this.availableBalanceAfter = availableBalanceAfter;
+        this.frozenBalanceAfter = frozenBalanceAfter;
         this.refTradeId = refTradeId;
         this.note = note;
     }
 
     public Long getId() {
         return id;
+    }
+
+    public String getBizId() {
+        return bizId;
     }
 
     public UserEntity getUser() {
@@ -88,12 +113,24 @@ public class CashTransactionEntity {
         return txType;
     }
 
+    public OperationStatus getStatus() {
+        return status;
+    }
+
     public BigDecimal getAmount() {
         return amount;
     }
 
     public BigDecimal getBalanceAfter() {
         return balanceAfter;
+    }
+
+    public BigDecimal getAvailableBalanceAfter() {
+        return availableBalanceAfter;
+    }
+
+    public BigDecimal getFrozenBalanceAfter() {
+        return frozenBalanceAfter;
     }
 
     public Long getRefTradeId() {

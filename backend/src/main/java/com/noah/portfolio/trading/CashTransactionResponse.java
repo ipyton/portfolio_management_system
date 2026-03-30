@@ -14,10 +14,14 @@ public record CashTransactionResponse(
 
 record CashTransactionItem(
         Long transactionId,
+        String bizId,
         String currency,
         String txType,
+        String status,
         BigDecimal amount,
         BigDecimal balanceAfter,
+        BigDecimal availableBalanceAfter,
+        BigDecimal frozenBalanceAfter,
         Long refTradeId,
         Instant occurredAt,
         String note

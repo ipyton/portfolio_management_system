@@ -23,6 +23,9 @@ public class TradeHistoryEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "biz_id", nullable = false, length = 64)
+    private String bizId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "holding_id", nullable = false)
     private HoldingEntity holding;
@@ -30,6 +33,10 @@ public class TradeHistoryEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "trade_type", nullable = false)
     private TradeType tradeType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OperationStatus status;
 
     @Column(nullable = false, precision = 18, scale = 6)
     private BigDecimal quantity;
@@ -43,6 +50,12 @@ public class TradeHistoryEntity {
     @Column(nullable = false, precision = 18, scale = 6)
     private BigDecimal fee;
 
+    @Column(name = "holding_quantity_after", nullable = false, precision = 18, scale = 6)
+    private BigDecimal holdingQuantityAfter;
+
+    @Column(name = "holding_avg_cost_after", nullable = false, precision = 18, scale = 6)
+    private BigDecimal holdingAvgCostAfter;
+
     @Column(name = "traded_at", nullable = false, insertable = false, updatable = false)
     private Instant tradedAt;
 
@@ -53,25 +66,37 @@ public class TradeHistoryEntity {
     }
 
     public TradeHistoryEntity(
+            String bizId,
             HoldingEntity holding,
             TradeType tradeType,
+            OperationStatus status,
             BigDecimal quantity,
             BigDecimal price,
             BigDecimal amount,
             BigDecimal fee,
+            BigDecimal holdingQuantityAfter,
+            BigDecimal holdingAvgCostAfter,
             String note
     ) {
+        this.bizId = bizId;
         this.holding = holding;
         this.tradeType = tradeType;
+        this.status = status;
         this.quantity = quantity;
         this.price = price;
         this.amount = amount;
         this.fee = fee;
+        this.holdingQuantityAfter = holdingQuantityAfter;
+        this.holdingAvgCostAfter = holdingAvgCostAfter;
         this.note = note;
     }
 
     public Long getId() {
         return id;
+    }
+
+    public String getBizId() {
+        return bizId;
     }
 
     public HoldingEntity getHolding() {
@@ -80,6 +105,10 @@ public class TradeHistoryEntity {
 
     public TradeType getTradeType() {
         return tradeType;
+    }
+
+    public OperationStatus getStatus() {
+        return status;
     }
 
     public BigDecimal getQuantity() {
@@ -96,6 +125,14 @@ public class TradeHistoryEntity {
 
     public BigDecimal getFee() {
         return fee;
+    }
+
+    public BigDecimal getHoldingQuantityAfter() {
+        return holdingQuantityAfter;
+    }
+
+    public BigDecimal getHoldingAvgCostAfter() {
+        return holdingAvgCostAfter;
     }
 
     public Instant getTradedAt() {

@@ -4,10 +4,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.noah.portfolio.asset.AssetEntity;
@@ -53,13 +55,22 @@ public class TradingService {
     public TradeResponse buy(TradeRequest request) {
         UserEntity user = requireUser(request.userId());
         AssetEntity asset = requireStockAsset(request.assetId());
+        String bizId = requireBizId(request.bizId());
+        TradeHistoryEntity existing = tradeHistoryRepository.findByBizId(bizId).orElse(null);
+        if (existing != null) {
+            validateExistingTrade(existing, user.getId(), asset.getId(), TradeType.BUY, request);
+            return toTradeResponse(existing);
+        }
+
         BigDecimal fee = normalizeFee(request.fee());
-        BigDecimal amount = normalize(request.quantity().multiply(request.price()));
+        BigDecimal quantity = normalize(request.quantity());
+        BigDecimal price = normalize(request.price());
+        BigDecimal amount = normalize(quantity.multiply(price));
         BigDecimal totalCost = normalize(amount.add(fee));
 
         CashAccountEntity cashAccount = findOrCreateCashAccount(user, asset.getCurrency());
 
-        if (cashAccount.getBalance().compareTo(totalCost) < 0) {
+        if (cashAccount.getAvailableBalance().compareTo(totalCost) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient cash balance.");
         }
 
@@ -67,7 +78,7 @@ public class TradingService {
                 .orElse(new HoldingEntity(user, asset, BigDecimal.ZERO.setScale(SCALE), BigDecimal.ZERO.setScale(SCALE)));
 
         BigDecimal oldQuantity = normalize(holding.getQuantity());
-        BigDecimal newQuantity = normalize(oldQuantity.add(request.quantity()));
+        BigDecimal newQuantity = normalize(oldQuantity.add(quantity));
         BigDecimal oldCostBasis = holding.getAvgCost().multiply(oldQuantity);
         BigDecimal newCostBasis = oldCostBasis.add(totalCost);
 
@@ -77,109 +88,108 @@ public class TradingService {
                 : normalize(newCostBasis.divide(newQuantity, SCALE, RoundingMode.HALF_UP)));
         holding = holdingRepository.save(holding);
 
-        cashAccount.setBalance(normalize(cashAccount.getBalance().subtract(totalCost)));
+        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().subtract(totalCost));
+        BigDecimal frozenAfter = normalize(cashAccount.getFrozenBalance());
+        cashAccount.setBalances(availableAfter, frozenAfter);
         cashAccountRepository.save(cashAccount);
 
         TradeHistoryEntity trade = tradeHistoryRepository.save(new TradeHistoryEntity(
+                bizId,
                 holding,
                 TradeType.BUY,
-                normalize(request.quantity()),
-                normalize(request.price()),
-                amount,
-                fee,
-                request.note()
-        ));
-
-        cashTransactionRepository.save(new CashTransactionEntity(
-                user,
-                asset.getCurrency(),
-                CashTransactionType.BUY,
-                totalCost.negate(),
-                cashAccount.getBalance(),
-                trade.getId(),
-                request.note()
-        ));
-
-        return new TradeResponse(
-                trade.getId(),
-                TradeType.BUY.name(),
-                user.getId(),
-                asset.getId(),
-                asset.getSymbol(),
-                normalize(request.quantity()),
-                normalize(request.price()),
+                OperationStatus.SUCCESS,
+                quantity,
+                price,
                 amount,
                 fee,
                 holding.getQuantity(),
                 holding.getAvgCost(),
-                cashAccount.getBalance(),
-                asset.getCurrency(),
                 request.note()
-        );
+        ));
+
+        cashTransactionRepository.save(new CashTransactionEntity(
+                bizId,
+                user,
+                asset.getCurrency(),
+                CashTransactionType.BUY,
+                OperationStatus.SUCCESS,
+                totalCost.negate(),
+                cashAccount.getBalance(),
+                cashAccount.getAvailableBalance(),
+                cashAccount.getFrozenBalance(),
+                trade.getId(),
+                request.note()
+        ));
+
+        return toTradeResponse(trade);
     }
 
     public TradeResponse sell(TradeRequest request) {
         UserEntity user = requireUser(request.userId());
         AssetEntity asset = requireStockAsset(request.assetId());
+        String bizId = requireBizId(request.bizId());
+        TradeHistoryEntity existing = tradeHistoryRepository.findByBizId(bizId).orElse(null);
+        if (existing != null) {
+            validateExistingTrade(existing, user.getId(), asset.getId(), TradeType.SELL, request);
+            return toTradeResponse(existing);
+        }
+
         BigDecimal fee = normalizeFee(request.fee());
-        BigDecimal amount = normalize(request.quantity().multiply(request.price()));
+        BigDecimal quantity = normalize(request.quantity());
+        BigDecimal price = normalize(request.price());
+        BigDecimal amount = normalize(quantity.multiply(price));
         BigDecimal netProceeds = normalize(amount.subtract(fee));
 
         HoldingEntity holding = holdingRepository.findByUserIdAndAssetId(request.userId(), request.assetId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Holding not found."));
 
-        if (holding.getQuantity().compareTo(request.quantity()) < 0) {
+        if (holding.getQuantity().compareTo(quantity) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient holding quantity.");
         }
 
         CashAccountEntity cashAccount = findOrCreateCashAccount(user, asset.getCurrency());
 
-        BigDecimal newQuantity = normalize(holding.getQuantity().subtract(request.quantity()));
+        BigDecimal newQuantity = normalize(holding.getQuantity().subtract(quantity));
         holding.setQuantity(newQuantity);
         if (newQuantity.signum() == 0) {
             holding.setAvgCost(BigDecimal.ZERO.setScale(SCALE));
         }
         holding = holdingRepository.save(holding);
 
-        cashAccount.setBalance(normalize(cashAccount.getBalance().add(netProceeds)));
+        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().add(netProceeds));
+        BigDecimal frozenAfter = normalize(cashAccount.getFrozenBalance());
+        cashAccount.setBalances(availableAfter, frozenAfter);
         cashAccountRepository.save(cashAccount);
 
         TradeHistoryEntity trade = tradeHistoryRepository.save(new TradeHistoryEntity(
+                bizId,
                 holding,
                 TradeType.SELL,
-                normalize(request.quantity()),
-                normalize(request.price()),
-                amount,
-                fee,
-                request.note()
-        ));
-
-        cashTransactionRepository.save(new CashTransactionEntity(
-                user,
-                asset.getCurrency(),
-                CashTransactionType.SELL,
-                netProceeds,
-                cashAccount.getBalance(),
-                trade.getId(),
-                request.note()
-        ));
-
-        return new TradeResponse(
-                trade.getId(),
-                TradeType.SELL.name(),
-                user.getId(),
-                asset.getId(),
-                asset.getSymbol(),
-                normalize(request.quantity()),
-                normalize(request.price()),
+                OperationStatus.SUCCESS,
+                quantity,
+                price,
                 amount,
                 fee,
                 holding.getQuantity(),
                 holding.getAvgCost(),
-                cashAccount.getBalance(),
-                asset.getCurrency(),
                 request.note()
-        );
+        ));
+
+        cashTransactionRepository.save(new CashTransactionEntity(
+                bizId,
+                user,
+                asset.getCurrency(),
+                CashTransactionType.SELL,
+                OperationStatus.SUCCESS,
+                netProceeds,
+                cashAccount.getBalance(),
+                cashAccount.getAvailableBalance(),
+                cashAccount.getFrozenBalance(),
+                trade.getId(),
+                request.note()
+        ));
+
+        return toTradeResponse(trade);
     }
 
     @Transactional(readOnly = true)
@@ -245,7 +255,12 @@ public class TradingService {
     private CashAccountEntity findOrCreateCashAccount(UserEntity user, String currency) {
         return cashAccountRepository.findByUserIdAndCurrency(user.getId(), currency)
                 .orElseGet(() -> cashAccountRepository.save(
-                        new CashAccountEntity(user, currency, BigDecimal.ZERO.setScale(SCALE))
+                        new CashAccountEntity(
+                                user,
+                                currency,
+                                BigDecimal.ZERO.setScale(SCALE),
+                                BigDecimal.ZERO.setScale(SCALE)
+                        )
                 ));
     }
 
@@ -280,15 +295,19 @@ public class TradingService {
         AssetEntity asset = holding.getAsset();
         return new TradeHistoryItem(
                 trade.getId(),
+                trade.getBizId(),
                 holding.getId(),
                 asset.getId(),
                 asset.getSymbol(),
                 asset.getCurrency(),
                 trade.getTradeType().name(),
+                trade.getStatus().name(),
                 trade.getQuantity(),
                 trade.getPrice(),
                 trade.getAmount(),
                 trade.getFee(),
+                trade.getHoldingQuantityAfter(),
+                trade.getHoldingAvgCostAfter(),
                 trade.getTradedAt(),
                 trade.getNote()
         );
@@ -336,5 +355,60 @@ public class TradingService {
                 asset.getCurrency(),
                 message
         );
+    }
+
+    private TradeResponse toTradeResponse(TradeHistoryEntity trade) {
+        HoldingEntity holding = trade.getHolding();
+        AssetEntity asset = holding.getAsset();
+        CashTransactionEntity cashTransaction = cashTransactionRepository.findFirstByRefTradeIdOrderByIdDesc(trade.getId())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Cash transaction not found for trade " + trade.getId() + "."
+                ));
+
+        return new TradeResponse(
+                trade.getId(),
+                trade.getBizId(),
+                trade.getTradeType().name(),
+                trade.getStatus().name(),
+                holding.getUser().getId(),
+                asset.getId(),
+                asset.getSymbol(),
+                trade.getQuantity(),
+                trade.getPrice(),
+                trade.getAmount(),
+                trade.getFee(),
+                trade.getHoldingQuantityAfter(),
+                trade.getHoldingAvgCostAfter(),
+                cashTransaction.getBalanceAfter(),
+                cashTransaction.getAvailableBalanceAfter(),
+                cashTransaction.getFrozenBalanceAfter(),
+                asset.getCurrency(),
+                trade.getNote()
+        );
+    }
+
+    private void validateExistingTrade(
+            TradeHistoryEntity existing,
+            Long userId,
+            Long assetId,
+            TradeType tradeType,
+            TradeRequest request
+    ) {
+        if (!Objects.equals(existing.getHolding().getUser().getId(), userId)
+                || !Objects.equals(existing.getHolding().getAsset().getId(), assetId)
+                || existing.getTradeType() != tradeType
+                || normalize(existing.getQuantity()).compareTo(normalize(request.quantity())) != 0
+                || normalize(existing.getPrice()).compareTo(normalize(request.price())) != 0
+                || normalize(existing.getFee()).compareTo(normalizeFee(request.fee())) != 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "bizId already exists for a different trade request.");
+        }
+    }
+
+    private String requireBizId(String bizId) {
+        if (!StringUtils.hasText(bizId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bizId must not be blank.");
+        }
+        return bizId.trim();
     }
 }
