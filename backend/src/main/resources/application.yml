@@ -26,5 +26,32 @@ resilience:
     window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
   degradation:
     enabled: ${DEGRADATION_ENABLED:false}
-    allow-path-prefixes: ${DEGRADATION_ALLOW_PATHS:/api/health}
+    allow-path-prefixes: ${DEGRADATION_ALLOW_PATHS:/api/health,/swagger-ui,/v3/api-docs}
     message: ${DEGRADATION_MESSAGE:Service is temporarily degraded. Please try again later.}
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+scheduler:
+  zone: ${SCHEDULER_ZONE:UTC}
+  pool:
+    size: ${SCHEDULER_POOL_SIZE:4}
+    shutdown-await-termination-seconds: ${SCHEDULER_SHUTDOWN_WAIT_SECONDS:30}
+  jobs:
+    market-data-refresh:
+      enabled: ${JOB_MARKET_DATA_REFRESH_ENABLED:true}
+      cron: ${JOB_MARKET_DATA_REFRESH_CRON:0 0 22 * * MON-FRI}
+    portfolio-nav-snapshot:
+      enabled: ${JOB_PORTFOLIO_NAV_SNAPSHOT_ENABLED:true}
+      cron: ${JOB_PORTFOLIO_NAV_SNAPSHOT_CRON:0 10 22 * * MON-FRI}
+    system-config-refresh:
+      enabled: ${JOB_SYSTEM_CONFIG_REFRESH_ENABLED:true}
+      cron: ${JOB_SYSTEM_CONFIG_REFRESH_CRON:0 0 6 * * MON}
+yahoo-finance:
+  enabled: ${YAHOO_FINANCE_ENABLED:true}
+  base-url: ${YAHOO_FINANCE_BASE_URL:https://query1.finance.yahoo.com}
+  timeout: ${YAHOO_FINANCE_TIMEOUT:5s}
+  user-agent: ${YAHOO_FINANCE_USER_AGENT:portfolio-management-system/1.0}

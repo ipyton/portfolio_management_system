@@ -38,7 +38,7 @@ public class RequestKeyFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return HttpMethod.OPTIONS.matches(request.getMethod());
+        return HttpMethod.OPTIONS.matches(request.getMethod()) || isDocumentationPath(request.getRequestURI());
     }
 
     @Override
@@ -67,5 +67,11 @@ public class RequestKeyFilter extends OncePerRequestFilter {
             return false;
         }
         return requestKey.equals(expectedValue);
+    }
+
+    private boolean isDocumentationPath(String requestPath) {
+        return requestPath.startsWith("/swagger-ui")
+                || requestPath.equals("/swagger-ui.html")
+                || requestPath.startsWith("/v3/api-docs");
     }
 }
