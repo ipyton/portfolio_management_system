@@ -30,9 +30,9 @@ resilience:
     message: ${DEGRADATION_MESSAGE:Service is temporarily degraded. Please try again later.}
 springdoc:
   api-docs:
-    path: /v3/api-docs
+    path: ${SPRINGDOC_API_DOCS_PATH:/v3/api-docs}
   swagger-ui:
-    path: /swagger-ui.html
+    path: ${SPRINGDOC_SWAGGER_UI_PATH:/swagger-ui.html}
     operations-sorter: alpha
     tags-sorter: alpha
 scheduler:

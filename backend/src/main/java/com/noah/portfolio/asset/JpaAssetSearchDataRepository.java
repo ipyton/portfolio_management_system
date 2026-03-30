@@ -53,6 +53,17 @@ public class JpaAssetSearchDataRepository implements AssetSearchDataRepository {
                 )
             """;
 
+    private static final String PRICE_HISTORY_JPQL = """
+            select new com.noah.portfolio.asset.AssetPriceHistoryPoint(
+                p.asset.id,
+                p.close,
+                p.tradeDate
+            )
+            from AssetPriceDailyEntity p
+            where p.asset.id in :assetIds
+            order by p.asset.id asc, p.tradeDate desc
+            """;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -82,5 +93,45 @@ public class JpaAssetSearchDataRepository implements AssetSearchDataRepository {
             byAssetId.put(snapshot.assetId(), snapshot);
         }
         return byAssetId;
+    }
+
+    @Override
+    public Map<Long, AssetPriceWindowSnapshot> findLatestPriceWindows(List<Long> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<AssetPriceHistoryPoint> points = entityManager.createQuery(
+                        PRICE_HISTORY_JPQL,
+                        AssetPriceHistoryPoint.class
+                )
+                .setParameter("assetIds", assetIds)
+                .getResultList();
+
+        Map<Long, AssetPriceWindowSnapshot> windows = new LinkedHashMap<>();
+        for (AssetPriceHistoryPoint point : points) {
+            AssetPriceWindowSnapshot existing = windows.get(point.assetId());
+            if (existing == null) {
+                windows.put(point.assetId(), new AssetPriceWindowSnapshot(
+                        point.assetId(),
+                        point.close(),
+                        point.tradeDate(),
+                        null,
+                        null
+                ));
+                continue;
+            }
+
+            if (existing.previousClose() == null) {
+                windows.put(point.assetId(), new AssetPriceWindowSnapshot(
+                        existing.assetId(),
+                        existing.latestClose(),
+                        existing.latestTradeDate(),
+                        point.close(),
+                        point.tradeDate()
+                ));
+            }
+        }
+        return windows;
     }
 }

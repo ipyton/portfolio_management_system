@@ -115,13 +115,3 @@ public class AssetEntity {
         return bondDetail;
     }
 }
-
-enum AssetType {
-    STOCK,
-    ETF,
-    FUND,
-    FUTURES,
-    CRYPTO,
-    BOND,
-    INDEX
-}

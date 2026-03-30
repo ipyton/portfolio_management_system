@@ -10,9 +10,20 @@ public interface AssetSearchDataRepository {
     List<AssetEntity> searchAssets(String query, int limit);
 
     Map<Long, AssetLatestPriceSnapshot> findLatestPriceSnapshots(List<Long> assetIds);
+
+    default Map<Long, AssetPriceWindowSnapshot> findLatestPriceWindows(List<Long> assetIds) {
+        return Map.of();
+    }
 }
 
 record AssetLatestPriceSnapshot(
+        Long assetId,
+        BigDecimal close,
+        LocalDate tradeDate
+) {
+}
+
+record AssetPriceHistoryPoint(
         Long assetId,
         BigDecimal close,
         LocalDate tradeDate
