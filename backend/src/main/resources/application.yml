@@ -19,3 +19,12 @@ security:
   request-key:
     header-name: ${REQUEST_KEY_HEADER:X-Request-Key}
     value: ${REQUEST_KEY:ef928c10-2da4-4ca6-9b49-dedc912d5b4c}
+resilience:
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    max-requests: ${RATE_LIMIT_MAX_REQUESTS:60}
+    window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
+  degradation:
+    enabled: ${DEGRADATION_ENABLED:false}
+    allow-path-prefixes: ${DEGRADATION_ALLOW_PATHS:/api/health}
+    message: ${DEGRADATION_MESSAGE:Service is temporarily degraded. Please try again later.}

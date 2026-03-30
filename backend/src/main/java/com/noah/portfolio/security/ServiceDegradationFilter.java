@@ -1,6 +1,8 @@
 package com.noah.portfolio.security;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
@@ -8,7 +10,6 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.noah.portfolio.common.ErrorResponseWriter;
@@ -19,26 +20,32 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
-public class RequestKeyFilter extends OncePerRequestFilter {
+@Order(Ordered.HIGHEST_PRECEDENCE + 10)
+public class ServiceDegradationFilter extends OncePerRequestFilter {
 
-    private final String headerName;
-    private final String expectedValue;
+    private final boolean enabled;
+    private final List<String> allowPrefixes;
+    private final String message;
     private final ErrorResponseWriter errorResponseWriter;
 
-    public RequestKeyFilter(
-            @Value("${security.request-key.header-name}") String headerName,
-            @Value("${security.request-key.value}") String expectedValue,
+    public ServiceDegradationFilter(
+            @Value("${resilience.degradation.enabled:false}") boolean enabled,
+            @Value("${resilience.degradation.allow-path-prefixes:/api/health}") String allowPathPrefixes,
+            @Value("${resilience.degradation.message:Service is temporarily degraded. Please try again later.}") String message,
             ErrorResponseWriter errorResponseWriter
     ) {
-        this.headerName = headerName;
-        this.expectedValue = expectedValue;
+        this.enabled = enabled;
+        this.allowPrefixes = Arrays.stream(allowPathPrefixes.split(","))
+                .map(String::trim)
+                .filter(prefix -> !prefix.isEmpty())
+                .toList();
+        this.message = message;
         this.errorResponseWriter = errorResponseWriter;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return HttpMethod.OPTIONS.matches(request.getMethod());
+        return !enabled || HttpMethod.OPTIONS.matches(request.getMethod()) || isAllowedPath(request.getRequestURI());
     }
 
     @Override
@@ -47,25 +54,16 @@ public class RequestKeyFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        String requestKey = request.getHeader(headerName);
-        if (isAuthorized(requestKey)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         errorResponseWriter.write(
                 request,
                 response,
-                HttpStatus.FORBIDDEN,
-                "FORBIDDEN",
-                "Invalid or missing request key"
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "SERVICE_DEGRADED",
+                message
         );
     }
 
-    private boolean isAuthorized(String requestKey) {
-        if (!StringUtils.hasText(requestKey) || !StringUtils.hasText(expectedValue)) {
-            return false;
-        }
-        return requestKey.equals(expectedValue);
+    private boolean isAllowedPath(String requestPath) {
+        return allowPrefixes.stream().anyMatch(requestPath::startsWith);
     }
 }
