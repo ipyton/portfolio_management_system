@@ -45,6 +45,10 @@ public class CashAccountEntity {
         return id;
     }
 
+    public UserEntity getUser() {
+        return user;
+    }
+
     public String getCurrency() {
         return currency;
     }

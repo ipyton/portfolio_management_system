@@ -71,6 +71,42 @@ public class CashTransactionEntity {
         this.refTradeId = refTradeId;
         this.note = note;
     }
+
+    public Long getId() {
+        return id;
+    }
+
+    public UserEntity getUser() {
+        return user;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public CashTransactionType getTxType() {
+        return txType;
+    }
+
+    public BigDecimal getAmount() {
+        return amount;
+    }
+
+    public BigDecimal getBalanceAfter() {
+        return balanceAfter;
+    }
+
+    public Long getRefTradeId() {
+        return refTradeId;
+    }
+
+    public Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    public String getNote() {
+        return note;
+    }
 }
 
 enum CashTransactionType {

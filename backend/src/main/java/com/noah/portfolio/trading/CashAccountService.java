@@ -2,6 +2,7 @@ package com.noah.portfolio.trading;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 import java.util.Locale;
 
 import org.springframework.http.HttpStatus;
@@ -103,9 +104,51 @@ public class CashAccountService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public CashAccountBalanceResponse getBalances(Long userId) {
+        ensureUserExists(userId);
+        List<CashAccountBalanceItem> items = cashAccountRepository.findByUserIdOrderByCurrencyAsc(userId).stream()
+                .map(account -> new CashAccountBalanceItem(
+                        account.getId(),
+                        account.getCurrency(),
+                        normalize(account.getBalance())
+                ))
+                .toList();
+        return new CashAccountBalanceResponse(userId, items.size(), items);
+    }
+
+    @Transactional(readOnly = true)
+    public CashTransactionResponse getTransactions(Long userId, String currency) {
+        ensureUserExists(userId);
+        String normalizedCurrency = StringUtils.hasText(currency) ? normalizeCurrency(currency) : null;
+        List<CashTransactionEntity> transactions = normalizedCurrency == null
+                ? cashTransactionRepository.findByUserIdOrderByIdDesc(userId)
+                : cashTransactionRepository.findByUserIdAndCurrencyOrderByIdDesc(userId, normalizedCurrency);
+
+        List<CashTransactionItem> items = transactions.stream()
+                .map(tx -> new CashTransactionItem(
+                        tx.getId(),
+                        tx.getCurrency(),
+                        tx.getTxType().name(),
+                        normalize(tx.getAmount()),
+                        normalize(tx.getBalanceAfter()),
+                        tx.getRefTradeId(),
+                        tx.getOccurredAt(),
+                        tx.getNote()
+                ))
+                .toList();
+        return new CashTransactionResponse(userId, normalizedCurrency, items.size(), items);
+    }
+
     private UserEntity requireUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
+    }
+
+    private void ensureUserExists(Long userId) {
+        if (!userRepository.existsById(userId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found.");
+        }
     }
 
     private CashAccountEntity findOrCreateCashAccount(UserEntity user, String currency) {

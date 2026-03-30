@@ -36,6 +36,18 @@ public class TradingController {
         return tradingService.getTradeHistory(userId);
     }
 
+    @PostMapping("/preview-buy")
+    @Operation(summary = "Preview buy trade", description = "Calculates the cash impact of a buy trade without persisting anything.")
+    public TradePreviewResponse previewBuy(@Valid @RequestBody TradeRequest request) {
+        return tradingService.previewBuy(request);
+    }
+
+    @PostMapping("/preview-sell")
+    @Operation(summary = "Preview sell trade", description = "Calculates the cash impact of a sell trade without persisting anything.")
+    public TradePreviewResponse previewSell(@Valid @RequestBody TradeRequest request) {
+        return tradingService.previewSell(request);
+    }
+
     @PostMapping("/buy")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Buy stock", description = "Creates a buy trade, updates holdings, and deducts cash balance.")

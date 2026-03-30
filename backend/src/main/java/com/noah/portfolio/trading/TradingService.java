@@ -183,6 +183,16 @@ public class TradingService {
     }
 
     @Transactional(readOnly = true)
+    public TradePreviewResponse previewBuy(TradeRequest request) {
+        return preview(request, TradeType.BUY);
+    }
+
+    @Transactional(readOnly = true)
+    public TradePreviewResponse previewSell(TradeRequest request) {
+        return preview(request, TradeType.SELL);
+    }
+
+    @Transactional(readOnly = true)
     public HoldingResponse getHoldings(Long userId) {
         ensureUserExists(userId);
         List<HoldingEntity> holdings = holdingRepository.findByUserIdOrderByIdDesc(userId);
@@ -297,5 +307,34 @@ public class TradingService {
             return null;
         }
         return dailyChange.divide(priceWindow.previousClose(), SCALE, RoundingMode.HALF_UP);
+    }
+
+    private TradePreviewResponse preview(TradeRequest request, TradeType tradeType) {
+        UserEntity user = requireUser(request.userId());
+        AssetEntity asset = requireStockAsset(request.assetId());
+        BigDecimal quantity = normalize(request.quantity());
+        BigDecimal price = normalize(request.price());
+        BigDecimal fee = normalizeFee(request.fee());
+        BigDecimal amount = normalize(quantity.multiply(price));
+        BigDecimal grossCashImpact = tradeType == TradeType.BUY
+                ? normalize(amount.add(fee)).negate()
+                : normalize(amount.subtract(fee));
+
+        String message = tradeType == TradeType.BUY
+                ? "Preview only. Buying will reduce cash by amount plus fee."
+                : "Preview only. Selling will increase cash by amount minus fee.";
+
+        return new TradePreviewResponse(
+                tradeType.name(),
+                user.getId(),
+                asset.getId(),
+                quantity,
+                price,
+                amount,
+                fee,
+                grossCashImpact,
+                asset.getCurrency(),
+                message
+        );
     }
 }
