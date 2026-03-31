@@ -56,8 +56,7 @@ export default function App() {
         <div className="brand-lockup">
           <img src="/logo.png" alt="HSBC logo" className="brand-logo-image" />
           <div className="brand-copy">
-            <p className="brand-kicker">Portfolio Management System</p>
-            <strong className="brand-name">Global Markets Control Room</strong>
+            <strong className="brand-name">PiggyBank</strong>
           </div>
         </div>
 
