@@ -76,6 +76,7 @@ public class PortfolioAnalyticsService {
         List<HoldingSnapshot> holdings = fetchHoldings(userId);
         List<CashBalance> cashBalances = fetchCashBalances(userId);
         List<TradeRecord> trades = fetchTrades(userId);
+        String reportingCurrency = resolveReportingCurrency(requestedBaseCurrency);
 
         LocalDate startDate = navPoints.isEmpty() ? null : navPoints.get(0).navDate();
         LocalDate endDate = navPoints.isEmpty() ? null : navPoints.get(navPoints.size() - 1).navDate();
@@ -84,10 +85,9 @@ public class PortfolioAnalyticsService {
                 ? Collections.emptyMap()
                 : fetchBenchmarkSeries(startDate, endDate);
 
-        String dominantRegion = resolveDominantRegion(holdings);
+        String dominantRegion = resolveDominantRegion(holdings, reportingCurrency);
         String primaryBenchmarkSymbol = selectPrimaryBenchmark(requestedBenchmarkSymbol, benchmarkSeries.keySet(), dominantRegion);
         double riskFreeRate = fetchRiskFreeRate(resolveRiskFreeCurrency(dominantRegion));
-        String reportingCurrency = resolveReportingCurrency(requestedBaseCurrency);
 
         List<ReturnPoint> portfolioReturns = buildPortfolioReturnSeries(navPoints);
         List<Map<String, Object>> benchmarkComparisons = buildBenchmarkComparisons(
@@ -104,11 +104,12 @@ public class PortfolioAnalyticsService {
         double totalAvailableFunds = resolveAvailableFunds(cashBalances, reportingCurrency);
         double totalHoldingMarketValue = resolveHoldingMarketValue(navPoints, holdings, reportingCurrency);
         double totalPortfolioValue = totalHoldingMarketValue + totalCash;
+        LocalDate asOfDate = resolveAsOfDate(navPoints, holdings);
 
         LinkedHashMap<String, Object> response = new LinkedHashMap<>();
         response.put("userId", userId);
         response.put("hasData", !navPoints.isEmpty() || !holdings.isEmpty() || !cashBalances.isEmpty() || !trades.isEmpty());
-        response.put("asOf", endDate != null ? endDate.toString() : LocalDate.now().toString());
+        response.put("asOf", asOfDate != null ? asOfDate.toString() : LocalDate.now().toString());
         response.put("performance", buildPerformanceSection(navPoints, portfolioReturns, benchmarkComparisons));
         response.put("risk", buildRiskSection(navPoints, portfolioReturns, primaryBenchmarkMetrics, riskFreeRate));
         response.put("holdings", buildHoldingsSection(holdings, cashBalances, totalHoldingMarketValue, totalPortfolioValue, reportingCurrency));
@@ -120,6 +121,8 @@ public class PortfolioAnalyticsService {
                 totalHoldingMarketValue,
                 totalCash,
                 totalAvailableFunds,
+                totalPortfolioValue,
+                asOfDate,
                 reportingCurrency
         ));
         response.put("meta", buildMetaSection(
@@ -211,7 +214,7 @@ public class PortfolioAnalyticsService {
         double totalTradeAmount = sum(trades.stream().map(trade -> tradeAmount(trade, reportingCurrency)).toList());
         double averagePortfolioValue = navPoints.isEmpty()
                 ? currentPortfolioValue
-                : navPoints.stream().mapToDouble(NavPoint::totalValue).average().orElse(currentPortfolioValue);
+                : navPoints.stream().mapToDouble(navPoint -> navTotalValue(navPoint, reportingCurrency)).average().orElse(currentPortfolioValue);
         Double turnoverRate = almostZero(averagePortfolioValue) ? null : totalTradeAmount / averagePortfolioValue;
 
         trading.put("turnoverRate", turnoverRate == null ? null : round(turnoverRate));
@@ -232,10 +235,12 @@ public class PortfolioAnalyticsService {
             double totalHoldingMarketValue,
             double totalCash,
             double totalAvailableFunds,
+            double totalPortfolioValue,
+            LocalDate asOfDate,
             String reportingCurrency
     ) {
         LinkedHashMap<String, Object> realtime = new LinkedHashMap<>();
-        realtime.put("todayPnl", computeTodayPnl(navPoints));
+        realtime.put("todayPnl", computeTodayPnl(navPoints, totalPortfolioValue, reportingCurrency, asOfDate));
         realtime.put("holdingMarketValue", round(totalHoldingMarketValue));
         realtime.put("cashBalance", round(totalCash));
         realtime.put("availableFunds", round(totalAvailableFunds));
@@ -251,7 +256,7 @@ public class PortfolioAnalyticsService {
                 ))
                 .toList());
         realtime.put("holdings", holdings.stream()
-                .sorted(Comparator.comparing(HoldingSnapshot::marketValue).reversed())
+                .sorted(Comparator.comparing((HoldingSnapshot holding) -> holdingMarketValue(holding, reportingCurrency)).reversed())
                 .map(holding -> toRealtimeHoldingMap(holding, totalHoldingMarketValue, reportingCurrency))
                 .toList());
         return realtime;
@@ -611,7 +616,7 @@ public class PortfolioAnalyticsService {
         if (!cashBalances.isEmpty()) {
             return sum(cashBalances.stream().map(balance -> cashBalanceValue(balance, reportingCurrency)).toList());
         }
-        return navPoints.isEmpty() ? 0.0 : navPoints.get(navPoints.size() - 1).cash();
+        return navPoints.isEmpty() ? 0.0 : navCashValue(navPoints.get(navPoints.size() - 1), reportingCurrency);
     }
 
     private double resolveAvailableFunds(List<CashBalance> cashBalances, String reportingCurrency) {
@@ -625,7 +630,7 @@ public class PortfolioAnalyticsService {
         if (!holdings.isEmpty()) {
             return sum(holdings.stream().map(holding -> holdingMarketValue(holding, reportingCurrency)).toList());
         }
-        return navPoints.isEmpty() ? 0.0 : navPoints.get(navPoints.size() - 1).holdingValue();
+        return navPoints.isEmpty() ? 0.0 : navHoldingValue(navPoints.get(navPoints.size() - 1), reportingCurrency);
     }
 
     private String resolveReportingCurrency(String requestedBaseCurrency) {
@@ -662,6 +667,18 @@ public class PortfolioAnalyticsService {
         return fxRateService.convert(BigDecimal.valueOf(amount), fromCurrency, reportingCurrency)
                 .map(BigDecimal::doubleValue)
                 .orElse(amount);
+    }
+
+    private double navTotalValue(NavPoint navPoint, String reportingCurrency) {
+        return convertOrFallback(navPoint.totalValue(), fxRateService.reportingCurrency(), reportingCurrency);
+    }
+
+    private double navHoldingValue(NavPoint navPoint, String reportingCurrency) {
+        return convertOrFallback(navPoint.holdingValue(), fxRateService.reportingCurrency(), reportingCurrency);
+    }
+
+    private double navCashValue(NavPoint navPoint, String reportingCurrency) {
+        return convertOrFallback(navPoint.cash(), fxRateService.reportingCurrency(), reportingCurrency);
     }
 
     private boolean hasCrossCurrencyExposure(
@@ -841,30 +858,58 @@ public class PortfolioAnalyticsService {
         return Math.pow(1 + twr, TRADING_DAYS_PER_YEAR / count) - 1;
     }
 
-    private Double computeTodayPnl(List<NavPoint> navPoints) {
-        if (navPoints.size() >= 2) {
-            NavPoint latest = navPoints.get(navPoints.size() - 1);
-            NavPoint previous = navPoints.get(navPoints.size() - 2);
-            return round(latest.totalValue() - previous.totalValue());
+    private Double computeTodayPnl(
+            List<NavPoint> navPoints,
+            double currentPortfolioValue,
+            String reportingCurrency,
+            LocalDate asOfDate
+    ) {
+        if (navPoints.isEmpty()) {
+            return null;
         }
-        if (navPoints.size() == 1 && navPoints.get(0).dailyReturn() != null) {
-            NavPoint latest = navPoints.get(0);
-            double previousTotalValue = latest.totalValue() / (1 + latest.dailyReturn());
-            return round(latest.totalValue() - previousTotalValue);
+
+        NavPoint latest = navPoints.get(navPoints.size() - 1);
+        double latestTotalValue = navTotalValue(latest, reportingCurrency);
+        if (asOfDate != null && asOfDate.isAfter(latest.navDate())) {
+            return round(currentPortfolioValue - latestTotalValue);
+        }
+        if (navPoints.size() >= 2) {
+            NavPoint previous = navPoints.get(navPoints.size() - 2);
+            return round(latestTotalValue - navTotalValue(previous, reportingCurrency));
+        }
+        if (latest.dailyReturn() != null) {
+            double previousTotalValue = latestTotalValue / (1 + latest.dailyReturn());
+            return round(latestTotalValue - previousTotalValue);
         }
         return null;
     }
 
-    private String resolveDominantRegion(List<HoldingSnapshot> holdings) {
+    private String resolveDominantRegion(List<HoldingSnapshot> holdings, String reportingCurrency) {
         return holdings.stream()
                 .collect(Collectors.groupingBy(
                         HoldingSnapshot::region,
-                        Collectors.summingDouble(HoldingSnapshot::marketValue)
+                        Collectors.summingDouble(holding -> holdingMarketValue(holding, reportingCurrency))
                 ))
                 .entrySet().stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("US");
+    }
+
+    private LocalDate resolveAsOfDate(List<NavPoint> navPoints, List<HoldingSnapshot> holdings) {
+        LocalDate navAsOf = navPoints.isEmpty() ? null : navPoints.get(navPoints.size() - 1).navDate();
+        LocalDate marketAsOf = holdings.stream()
+                .map(HoldingSnapshot::latestPriceDate)
+                .filter(Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .orElse(null);
+        if (navAsOf == null) {
+            return marketAsOf;
+        }
+        if (marketAsOf == null) {
+            return navAsOf;
+        }
+        return marketAsOf.isAfter(navAsOf) ? marketAsOf : navAsOf;
     }
 
     private String resolveRiskFreeCurrency(String dominantRegion) {

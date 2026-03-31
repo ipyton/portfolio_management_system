@@ -48,6 +48,24 @@ public class PortfolioNavDailyEntity {
     protected PortfolioNavDailyEntity() {
     }
 
+    public PortfolioNavDailyEntity(
+            UserEntity user,
+            LocalDate navDate,
+            BigDecimal totalValue,
+            BigDecimal holdingValue,
+            BigDecimal cash,
+            BigDecimal netValue,
+            BigDecimal dailyReturn
+    ) {
+        this.user = user;
+        this.navDate = navDate;
+        this.totalValue = totalValue;
+        this.holdingValue = holdingValue;
+        this.cash = cash;
+        this.netValue = netValue;
+        this.dailyReturn = dailyReturn;
+    }
+
     public Long getId() {
         return id;
     }
@@ -78,5 +96,19 @@ public class PortfolioNavDailyEntity {
 
     public BigDecimal getDailyReturn() {
         return dailyReturn;
+    }
+
+    public void update(
+            BigDecimal totalValue,
+            BigDecimal holdingValue,
+            BigDecimal cash,
+            BigDecimal netValue,
+            BigDecimal dailyReturn
+    ) {
+        this.totalValue = totalValue;
+        this.holdingValue = holdingValue;
+        this.cash = cash;
+        this.netValue = netValue;
+        this.dailyReturn = dailyReturn;
     }
 }

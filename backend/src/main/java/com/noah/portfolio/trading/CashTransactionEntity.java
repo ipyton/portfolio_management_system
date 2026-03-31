@@ -145,12 +145,3 @@ public class CashTransactionEntity {
         return note;
     }
 }
-
-enum CashTransactionType {
-    DEPOSIT,
-    WITHDRAW,
-    BUY,
-    SELL,
-    FEE,
-    DIVIDEND
-}
