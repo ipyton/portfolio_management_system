@@ -143,8 +143,3 @@ public class TradeHistoryEntity {
         return note;
     }
 }
-
-enum TradeType {
-    BUY,
-    SELL
-}

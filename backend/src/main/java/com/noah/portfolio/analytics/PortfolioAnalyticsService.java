@@ -2,8 +2,6 @@ package com.noah.portfolio.analytics;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -18,12 +16,18 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.noah.portfolio.asset.AssetPriceDailyRepository;
 import com.noah.portfolio.fx.FxRateService;
+import com.noah.portfolio.trading.HoldingEntity;
+import com.noah.portfolio.trading.HoldingRepository;
+import com.noah.portfolio.trading.CashAccountRepository;
+import com.noah.portfolio.trading.TradeHistoryRepository;
+import com.noah.portfolio.user.UserEntity;
+import com.noah.portfolio.user.UserRepository;
 
 @Service
 @Transactional(readOnly = true)
@@ -33,11 +37,32 @@ public class PortfolioAnalyticsService {
     private static final double EPSILON = 1e-9;
     private static final int SCALE = 6;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final UserRepository userRepository;
+    private final PortfolioNavDailyRepository portfolioNavDailyRepository;
+    private final HoldingRepository holdingRepository;
+    private final CashAccountRepository cashAccountRepository;
+    private final TradeHistoryRepository tradeHistoryRepository;
+    private final AssetPriceDailyRepository assetPriceDailyRepository;
+    private final SystemConfigRepository systemConfigRepository;
     private final FxRateService fxRateService;
 
-    public PortfolioAnalyticsService(JdbcTemplate jdbcTemplate, FxRateService fxRateService) {
-        this.jdbcTemplate = jdbcTemplate;
+    public PortfolioAnalyticsService(
+            UserRepository userRepository,
+            PortfolioNavDailyRepository portfolioNavDailyRepository,
+            HoldingRepository holdingRepository,
+            CashAccountRepository cashAccountRepository,
+            TradeHistoryRepository tradeHistoryRepository,
+            AssetPriceDailyRepository assetPriceDailyRepository,
+            SystemConfigRepository systemConfigRepository,
+            FxRateService fxRateService
+    ) {
+        this.userRepository = userRepository;
+        this.portfolioNavDailyRepository = portfolioNavDailyRepository;
+        this.holdingRepository = holdingRepository;
+        this.cashAccountRepository = cashAccountRepository;
+        this.tradeHistoryRepository = tradeHistoryRepository;
+        this.assetPriceDailyRepository = assetPriceDailyRepository;
+        this.systemConfigRepository = systemConfigRepository;
         this.fxRateService = fxRateService;
     }
 
@@ -461,163 +486,111 @@ public class PortfolioAnalyticsService {
     }
 
     private Long resolveSingleUserId() {
-        List<Long> userIds = jdbcTemplate.query(
-                "SELECT id FROM users ORDER BY id LIMIT 1",
-                (rs, rowNum) -> rs.getLong("id")
-        );
-        return userIds.isEmpty() ? null : userIds.get(0);
+        return userRepository.findFirstByOrderByIdAsc()
+                .map(UserEntity::getId)
+                .orElse(null);
     }
 
     private List<NavPoint> fetchNavPoints(Long userId) {
-        return jdbcTemplate.query("""
-                        SELECT nav_date, total_value, holding_value, cash, net_value, daily_return
-                        FROM portfolio_nav_daily
-                        WHERE user_id = ?
-                        ORDER BY nav_date
-                        """,
-                (rs, rowNum) -> new NavPoint(
-                        rs.getDate("nav_date").toLocalDate(),
-                        getDouble(rs, "total_value"),
-                        getDouble(rs, "holding_value"),
-                        getDouble(rs, "cash"),
-                        getDouble(rs, "net_value"),
-                        getNullableDouble(rs, "daily_return")
-                ),
-                userId
-        );
+        return portfolioNavDailyRepository.findByUser_IdOrderByNavDateAsc(userId).stream()
+                .map(nav -> new NavPoint(
+                        nav.getNavDate(),
+                        decimalToDouble(nav.getTotalValue()),
+                        decimalToDouble(nav.getHoldingValue()),
+                        decimalToDouble(nav.getCash()),
+                        decimalToDouble(nav.getNetValue()),
+                        decimalToNullableDouble(nav.getDailyReturn())
+                ))
+                .toList();
     }
 
     private List<HoldingSnapshot> fetchHoldings(Long userId) {
-        return jdbcTemplate.query("""
-                        SELECT
-                            a.symbol,
-                            a.name,
-                            a.asset_type,
-                            a.currency,
-                            COALESCE(a.region, 'UNKNOWN') AS region,
-                            COALESCE(sd.sector, 'UNKNOWN') AS sector,
-                            COALESCE(sd.industry, 'UNKNOWN') AS industry,
-                            h.quantity,
-                            h.avg_cost,
-                            latest_price.close AS latest_price,
-                            latest_price.trade_date AS latest_price_date
-                        FROM holdings h
-                        JOIN assets a ON a.id = h.asset_id
-                        LEFT JOIN asset_stock_detail sd ON sd.asset_id = a.id
-                        LEFT JOIN asset_price_daily latest_price
-                          ON latest_price.asset_id = a.id
-                         AND latest_price.trade_date = (
-                            SELECT MAX(ap.trade_date)
-                            FROM asset_price_daily ap
-                            WHERE ap.asset_id = a.id
-                         )
-                        WHERE h.user_id = ?
-                          AND h.quantity <> 0
-                        ORDER BY a.symbol
-                        """,
-                (rs, rowNum) -> mapHolding(rs),
-                userId
-        );
-    }
+        List<HoldingEntity> holdings = holdingRepository.findActiveHoldingsWithAssetDetailsByUserId(userId);
+        if (holdings.isEmpty()) {
+            return List.of();
+        }
 
-    private HoldingSnapshot mapHolding(ResultSet rs) throws SQLException {
-        double quantity = getDouble(rs, "quantity");
-        double avgCost = getDouble(rs, "avg_cost");
-        Double latestPrice = getNullableDouble(rs, "latest_price");
-        double priceForValue = latestPrice == null ? avgCost : latestPrice;
-        double marketValue = quantity * priceForValue;
-        double unrealizedPnl = quantity * (priceForValue - avgCost);
+        List<Long> assetIds = holdings.stream()
+                .map(holding -> holding.getAsset().getId())
+                .distinct()
+                .toList();
 
-        return new HoldingSnapshot(
-                rs.getString("symbol"),
-                rs.getString("name"),
-                rs.getString("asset_type"),
-                rs.getString("currency"),
-                rs.getString("region"),
-                rs.getString("sector"),
-                rs.getString("industry"),
-                quantity,
-                avgCost,
-                latestPrice,
-                rs.getDate("latest_price_date") == null ? null : rs.getDate("latest_price_date").toLocalDate(),
-                marketValue,
-                unrealizedPnl
-        );
+        Map<Long, AssetPriceDailyRepository.AssetLatestPriceView> latestPricesByAssetId = assetPriceDailyRepository
+                .findLatestPriceViewsByAssetIdIn(assetIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        AssetPriceDailyRepository.AssetLatestPriceView::getAssetId,
+                        latestPrice -> latestPrice
+                ));
+
+        return holdings.stream()
+                .map(holding -> {
+                    AssetPriceDailyRepository.AssetLatestPriceView latestPrice = latestPricesByAssetId.get(holding.getAsset().getId());
+                    double quantity = decimalToDouble(holding.getQuantity());
+                    double avgCost = decimalToDouble(holding.getAvgCost());
+                    Double latestPriceValue = latestPrice == null ? null : decimalToNullableDouble(latestPrice.getClose());
+                    double priceForValue = latestPriceValue == null ? avgCost : latestPriceValue;
+                    double marketValue = quantity * priceForValue;
+                    double unrealizedPnl = quantity * (priceForValue - avgCost);
+
+                    return new HoldingSnapshot(
+                            holding.getAsset().getSymbol(),
+                            holding.getAsset().getName(),
+                            holding.getAsset().getAssetType().name(),
+                            holding.getAsset().getCurrency(),
+                            textOrDefault(holding.getAsset().getRegion(), "UNKNOWN"),
+                            holding.getAsset().getStockDetail() == null ? "UNKNOWN" : textOrDefault(holding.getAsset().getStockDetail().getSector(), "UNKNOWN"),
+                            holding.getAsset().getStockDetail() == null ? "UNKNOWN" : textOrDefault(holding.getAsset().getStockDetail().getIndustry(), "UNKNOWN"),
+                            quantity,
+                            avgCost,
+                            latestPriceValue,
+                            latestPrice == null ? null : latestPrice.getTradeDate(),
+                            marketValue,
+                            unrealizedPnl
+                    );
+                })
+                .toList();
     }
 
     private List<CashBalance> fetchCashBalances(Long userId) {
-        return jdbcTemplate.query("""
-                        SELECT currency, balance, available_balance, frozen_balance
-                        FROM cash_accounts
-                        WHERE user_id = ?
-                        ORDER BY currency
-                        """,
-                (rs, rowNum) -> new CashBalance(
-                        rs.getString("currency"),
-                        getDouble(rs, "balance"),
-                        getDouble(rs, "available_balance"),
-                        getDouble(rs, "frozen_balance")
-                ),
-                userId
-        );
+        return cashAccountRepository.findByUserIdOrderByCurrencyAsc(userId).stream()
+                .map(account -> new CashBalance(
+                        account.getCurrency(),
+                        decimalToDouble(account.getBalance()),
+                        decimalToDouble(account.getAvailableBalance()),
+                        decimalToDouble(account.getFrozenBalance())
+                ))
+                .toList();
     }
 
     private List<TradeRecord> fetchTrades(Long userId) {
-        return jdbcTemplate.query("""
-                        SELECT
-                            th.id,
-                            a.symbol,
-                            a.name,
-                            a.currency,
-                            th.trade_type,
-                            th.quantity,
-                            th.price,
-                            th.amount,
-                            th.fee,
-                            th.traded_at,
-                            th.note
-                        FROM trade_history th
-                        JOIN holdings h ON h.id = th.holding_id
-                        JOIN assets a ON a.id = h.asset_id
-                        WHERE h.user_id = ?
-                        ORDER BY th.traded_at DESC, th.id DESC
-                        """,
-                (rs, rowNum) -> new TradeRecord(
-                        rs.getLong("id"),
-                        rs.getString("symbol"),
-                        rs.getString("name"),
-                        rs.getString("currency"),
-                        rs.getString("trade_type"),
-                        getDouble(rs, "quantity"),
-                        getDouble(rs, "price"),
-                        getDouble(rs, "amount"),
-                        getDouble(rs, "fee"),
-                        rs.getTimestamp("traded_at").toInstant(),
-                        rs.getString("note")
-                ),
-                userId
-        );
+        return tradeHistoryRepository.findDetailedTradeHistoryByUserId(userId).stream()
+                .map(trade -> new TradeRecord(
+                        trade.getId(),
+                        trade.getHolding().getAsset().getSymbol(),
+                        trade.getHolding().getAsset().getName(),
+                        trade.getHolding().getAsset().getCurrency(),
+                        trade.getTradeType().name(),
+                        decimalToDouble(trade.getQuantity()),
+                        decimalToDouble(trade.getPrice()),
+                        decimalToDouble(trade.getAmount()),
+                        decimalToDouble(trade.getFee()),
+                        trade.getTradedAt(),
+                        trade.getNote()
+                ))
+                .toList();
     }
 
     private Map<String, List<BenchmarkPricePoint>> fetchBenchmarkSeries(LocalDate startDate, LocalDate endDate) {
-        List<BenchmarkPricePoint> pricePoints = jdbcTemplate.query("""
-                        SELECT a.symbol, a.name, COALESCE(a.region, 'UNKNOWN') AS region, p.trade_date, p.close
-                        FROM assets a
-                        JOIN asset_price_daily p ON p.asset_id = a.id
-                        WHERE a.is_benchmark = 1
-                          AND p.trade_date BETWEEN ? AND ?
-                        ORDER BY a.symbol, p.trade_date
-                        """,
-                (rs, rowNum) -> new BenchmarkPricePoint(
-                        rs.getString("symbol"),
-                        rs.getString("name"),
-                        rs.getString("region"),
-                        rs.getDate("trade_date").toLocalDate(),
-                        getDouble(rs, "close")
-                ),
-                startDate,
-                endDate
-        );
+        List<BenchmarkPricePoint> pricePoints = assetPriceDailyRepository.findBenchmarkPriceSeries(startDate, endDate).stream()
+                .map(point -> new BenchmarkPricePoint(
+                        point.getSymbol(),
+                        point.getName(),
+                        textOrDefault(point.getRegion(), "UNKNOWN"),
+                        point.getTradeDate(),
+                        decimalToDouble(point.getClose())
+                ))
+                .toList();
 
         return pricePoints.stream()
                 .collect(Collectors.groupingBy(
@@ -628,16 +601,10 @@ public class PortfolioAnalyticsService {
     }
 
     private double fetchRiskFreeRate(String currency) {
-        List<Double> values = jdbcTemplate.query("""
-                        SELECT config_val
-                        FROM system_config
-                        WHERE config_key = ?
-                        LIMIT 1
-                        """,
-                (rs, rowNum) -> Double.parseDouble(rs.getString("config_val")),
-                "risk_free_rate_" + currency
-        );
-        return values.isEmpty() ? 0.0 : values.get(0);
+        return systemConfigRepository.findByConfigKey("risk_free_rate_" + currency)
+                .map(SystemConfigEntity::getConfigVal)
+                .map(Double::parseDouble)
+                .orElse(0.0);
     }
 
     private double resolveCashTotal(List<NavPoint> navPoints, List<CashBalance> cashBalances, String reportingCurrency) {
@@ -1056,14 +1023,16 @@ public class PortfolioAnalyticsService {
                 .doubleValue();
     }
 
-    private double getDouble(ResultSet rs, String column) throws SQLException {
-        BigDecimal value = rs.getBigDecimal(column);
+    private double decimalToDouble(BigDecimal value) {
         return value == null ? 0.0 : value.doubleValue();
     }
 
-    private Double getNullableDouble(ResultSet rs, String column) throws SQLException {
-        BigDecimal value = rs.getBigDecimal(column);
+    private Double decimalToNullableDouble(BigDecimal value) {
         return value == null ? null : value.doubleValue();
+    }
+
+    private String textOrDefault(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value : defaultValue;
     }
 
     @FunctionalInterface
