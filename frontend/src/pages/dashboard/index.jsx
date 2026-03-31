@@ -9,7 +9,7 @@ const BENCH_DATA = {
   benchmark: [100, 101.4, 100.2, 104.6, 105.8, 103.1, 107.4, 109.8, 108.3, 112.1, 114.5, 115.2],
 };
 
-function BenchmarkChart() {
+function BenchmarkChart({ animKey }) {
   const [tooltip, setTooltip] = useState(null);
   const svgRef = useRef(null);
 
@@ -107,17 +107,21 @@ function BenchmarkChart() {
             fill="#97a1b8" fontSize="9" fontFamily="Manrope,sans-serif">{lbl}</text>
         ))}
 
-        {/* Areas */}
-        <path d={toArea(BENCH_DATA.benchmark)} fill="url(#gb)" />
-        <path d={toArea(BENCH_DATA.portfolio)} fill="url(#gp)" />
+        {/* Areas — slow fade in */}
+        <path key={`ba-${animKey}`} d={toArea(BENCH_DATA.benchmark)} fill="url(#gb)"
+          className="anim-area-slow" style={{ animationDelay: "200ms" }} />
+        <path key={`pa-${animKey}`} d={toArea(BENCH_DATA.portfolio)} fill="url(#gp)"
+          className="anim-area-slow" style={{ animationDelay: "400ms" }} />
 
-        {/* Lines */}
-        <path d={toPath(BENCH_DATA.benchmark)} fill="none"
-          stroke="#97a1b8" strokeWidth="1.8" strokeDasharray="5 3"
-          strokeLinecap="round" strokeLinejoin="round" />
-        <path d={toPath(BENCH_DATA.portfolio)} fill="none"
+        {/* Lines — slow draw in */}
+        <path key={`bl-${animKey}`} d={toPath(BENCH_DATA.benchmark)} fill="none"
+          stroke="#97a1b8" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round"
+          className="anim-line-slow" style={{ animationDelay: "0ms" }} />
+        <path key={`pl-${animKey}`} d={toPath(BENCH_DATA.portfolio)} fill="none"
           stroke="#79a8ff" strokeWidth="2.2"
-          strokeLinecap="round" strokeLinejoin="round" />
+          strokeLinecap="round" strokeLinejoin="round"
+          className="anim-line-slow" style={{ animationDelay: "150ms" }} />
 
         {/* Hover indicator */}
         {tooltip && (
@@ -163,6 +167,110 @@ function BenchmarkChart() {
   );
 }
 
+/* ─────────────────────────────────────────
+   INTRADAY P&L SPARKLINE  (9:30 → 15:30)
+───────────────────────────────────────── */
+const INTRADAY_PNL = [
+  { time: "9:30",  pnl:     0 },
+  { time: "10:00", pnl:  2140 },
+  { time: "10:30", pnl:  4870 },
+  { time: "11:00", pnl:  3620 },
+  { time: "11:30", pnl:  6310 },
+  { time: "12:00", pnl:  5480 },
+  { time: "12:30", pnl:  7920 },
+  { time: "13:00", pnl:  9250 },
+  { time: "13:30", pnl:  8100 },
+  { time: "14:00", pnl: 10640 },
+  { time: "14:30", pnl: 11380 },
+  { time: "15:00", pnl: 10820 },
+  { time: "15:30", pnl: 12480 },
+];
+
+function PnlSparkline({ animKey }) {
+  const [hover, setHover] = useState(null);
+  const W = 260, H = 80;
+  const PAD = { top: 8, right: 4, bottom: 20, left: 4 };
+  const iW = W - PAD.left - PAD.right;
+  const iH = H - PAD.top  - PAD.bottom;
+  const n  = INTRADAY_PNL.length;
+  const vals = INTRADAY_PNL.map((d) => d.pnl);
+  const minV = Math.min(...vals);
+  const maxV = Math.max(...vals);
+  const xOf  = (i) => PAD.left + (i / (n - 1)) * iW;
+  const yOf  = (v) => PAD.top + (1 - (v - minV) / (maxV - minV || 1)) * iH;
+  const linePath = vals.map((v, i) => `${i === 0 ? "M" : "L"} ${xOf(i).toFixed(1)} ${yOf(v).toFixed(1)}`).join(" ");
+  const areaPath = linePath + ` L ${xOf(n-1).toFixed(1)} ${H - PAD.bottom} L ${xOf(0).toFixed(1)} ${H - PAD.bottom} Z`;
+  const color = "#16a34a";
+
+  const handleMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    let nearest = 0, best = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(xOf(i) - mx);
+      if (d < best) { best = d; nearest = i; }
+    }
+    setHover(nearest);
+  };
+
+  return (
+    <div style={{ position: "relative", marginTop: 14 }}>
+      <svg viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: "auto", display: "block", overflow: "visible" }}
+        onMouseMove={handleMove} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="spark-pnl-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={color} stopOpacity="0.16" />
+            <stop offset="100%" stopColor={color} stopOpacity="0"    />
+          </linearGradient>
+        </defs>
+        <line x1={PAD.left} y1={yOf(0)} x2={W - PAD.right} y2={yOf(0)}
+          stroke="rgba(17,24,39,0.1)" strokeWidth="1" strokeDasharray="3 2" />
+        <path key={`sa-${animKey}`} d={areaPath} fill="url(#spark-pnl-grad)"
+          className="anim-area-slow" style={{ animationDelay: "200ms" }} />
+        <path key={`sl-${animKey}`} d={linePath} fill="none" stroke={color} strokeWidth="2.2"
+          strokeLinecap="round" strokeLinejoin="round"
+          className="anim-line-slow" style={{ animationDelay: "0ms" }} />
+        {[0, n - 1].map((i) => (
+          <text key={i} x={xOf(i)} y={H - 4}
+            textAnchor={i === 0 ? "start" : "end"}
+            fill="#9ca3af" fontSize="8.5" fontFamily="Manrope,sans-serif">
+            {INTRADAY_PNL[i].time}
+          </text>
+        ))}
+        {hover !== null && (
+          <g>
+            <line x1={xOf(hover)} y1={PAD.top} x2={xOf(hover)} y2={H - PAD.bottom}
+              stroke="rgba(17,24,39,0.16)" strokeWidth="1" strokeDasharray="2 2" />
+            <circle cx={xOf(hover)} cy={yOf(vals[hover])} r="3.5"
+              fill="#ffffff" stroke={color} strokeWidth="2" />
+          </g>
+        )}
+      </svg>
+      {hover !== null && (
+        <div style={{
+          position: "absolute", top: 0,
+          left: `clamp(0px, calc(${(xOf(hover) / W) * 100}% - 46px), calc(100% - 100px))`,
+          background: "rgba(255,255,255,0.97)",
+          border: "1px solid rgba(17,24,39,0.12)",
+          borderRadius: 8, padding: "5px 10px",
+          pointerEvents: "none",
+          boxShadow: "0 4px 14px rgba(17,24,39,0.1)",
+        }}>
+          <div style={{ fontSize: "0.63rem", color: "#6b7280", fontWeight: 700,
+            letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            {INTRADAY_PNL[hover].time}
+          </div>
+          <div style={{ fontSize: "0.82rem", fontWeight: 800,
+            color: INTRADAY_PNL[hover].pnl >= 0 ? "#16a34a" : "#dc2626" }}>
+            {INTRADAY_PNL[hover].pnl >= 0 ? "+" : ""}${Math.abs(INTRADAY_PNL[hover].pnl).toLocaleString()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const dashboardPageMeta = {
   eyebrow: "Operations Dashboard",
   title: "Run the desk from one calm operational view.",
@@ -176,6 +284,17 @@ export const dashboardActivityFeed = [];
    METRIC CATEGORIES  (top slider)
 ───────────────────────────────────────── */
 const CATEGORIES = [
+  {
+    id: "realtime", label: "Realtime", eyebrow: "Live Snapshot", accent: "#38bdf8",
+    pnl: { value: "+$12,480", detail: "Mark-to-market · Today" },
+    metrics: [
+      { key: "holdingMarketValue", label: "Holding Market Value", value: "$1.84M",    detail: "Current positions" },
+      { key: "cashBalance",        label: "Cash Balance",         value: "$312,500",  detail: "Available cash" },
+      { key: "availableFunds",     label: "Available Funds",      value: "$298,000",  detail: "Post-settlement" },
+      { key: "cashByCurrency",     label: "Cash by Currency",     value: "USD / HKD", detail: "Multi-currency" },
+      { key: "holdings",           label: "Holdings Count",       value: "42",        detail: "Active positions" },
+    ],
+  },
   {
     id: "performance", label: "Performance", eyebrow: "Returns & Benchmarks", accent: "#79a8ff",
     metrics: [
@@ -214,17 +333,6 @@ const CATEGORIES = [
       { key: "totalFees",         label: "Total Fees",         value: "$3,840",  detail: "Commission + spread" },
       { key: "tradeCount",        label: "Trade Count",        value: "128",     detail: "Executed orders" },
       { key: "buySellRecords",    label: "Buy / Sell Records", value: "74 / 54", detail: "Directional split" },
-    ],
-  },
-  {
-    id: "realtime", label: "Realtime", eyebrow: "Live Snapshot", accent: "#38bdf8",
-    metrics: [
-      { key: "todayPnl",           label: "Today's P&L",         value: "+$12,480",  detail: "Mark-to-market" },
-      { key: "holdingMarketValue", label: "Holding Market Value", value: "$1.84M",    detail: "Current positions" },
-      { key: "cashBalance",        label: "Cash Balance",         value: "$312,500",  detail: "Available cash" },
-      { key: "availableFunds",     label: "Available Funds",      value: "$298,000",  detail: "Post-settlement" },
-      { key: "cashByCurrency",     label: "Cash by Currency",     value: "USD / HKD", detail: "Multi-currency" },
-      { key: "holdings",           label: "Holdings Count",       value: "42",        detail: "Active positions" },
     ],
   },
 ];
@@ -323,17 +431,69 @@ export default function DashboardPage() {
            TOP SLIDER
         ══════════════════════════════════ */
         .metrics-slider {
-          border: 1px solid rgba(109,120,151,0.18);
-          background:
-            linear-gradient(180deg,rgba(14,17,24,0.97),rgba(10,12,18,0.95)),
-            radial-gradient(circle at top right,rgba(79,123,255,0.07),transparent 35%);
-          backdrop-filter: blur(20px);
-          box-shadow: 0 24px 70px rgba(0,0,0,0.42);
+          border: 1px solid rgba(17,24,39,0.1);
+          background: #ffffff;
+          box-shadow: 0 24px 50px rgba(17,24,39,0.1);
           border-radius: 30px;
-          padding: 44px 48px 36px;
           overflow: hidden;
           display: flex;
+          flex-direction: row;
+          align-items: stretch;
+        }
+        /* side arrow buttons */
+        .slider-side-btn {
+          flex-shrink: 0;
+          width: 64px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: none;
+          background: transparent;
+          cursor: pointer;
+          transition: background 200ms;
+          position: relative;
+        }
+        .slider-side-btn:first-child {
+          border-radius: 30px 0 0 30px;
+          border-right: 1px solid rgba(17,24,39,0.07);
+        }
+        .slider-side-btn:last-child {
+          border-radius: 0 30px 30px 0;
+          border-left: 1px solid rgba(17,24,39,0.07);
+        }
+        .slider-side-btn:hover { background: rgba(17,24,39,0.03); }
+        /* chevron icon built with CSS */
+        .slider-side-btn .chevron {
+          width: 28px; height: 28px;
+          border-radius: 50%;
+          border: 1.5px solid rgba(17,24,39,0.15);
+          display: flex; align-items: center; justify-content: center;
+          background: #ffffff;
+          box-shadow: 0 2px 8px rgba(17,24,39,0.08);
+          transition: border-color 200ms, box-shadow 200ms, transform 200ms;
+        }
+        .slider-side-btn:hover .chevron {
+          border-color: rgba(17,24,39,0.3);
+          box-shadow: 0 4px 14px rgba(17,24,39,0.13);
+          transform: scale(1.08);
+        }
+        .slider-side-btn .chevron svg {
+          width: 12px; height: 12px;
+          stroke: #6b7280;
+          fill: none;
+          stroke-width: 2;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          transition: stroke 200ms;
+        }
+        .slider-side-btn:hover .chevron svg { stroke: #111827; }
+        /* inner content area */
+        .slider-main {
+          flex: 1;
+          padding: 44px 32px 36px;
+          display: flex;
           flex-direction: column;
+          min-width: 0;
         }
         .slider-top-bar {
           display: flex;
@@ -347,9 +507,9 @@ export default function DashboardPage() {
         .slider-tab {
           padding: 8px 20px;
           border-radius: 999px;
-          border: 1px solid rgba(109,120,151,0.18);
+          border: 1px solid rgba(17,24,39,0.15);
           background: transparent;
-          color: #97a1b8;
+          color: #6b7280;
           font-size: 0.78rem;
           font-weight: 700;
           letter-spacing: 0.1em;
@@ -357,25 +517,37 @@ export default function DashboardPage() {
           cursor: pointer;
           transition: border-color 180ms, background 180ms, color 180ms;
         }
-        .slider-tab.active { color: #f2f5fb; background: rgba(34,40,57,0.94); }
-        .slider-nav { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
-        .slider-btn {
-          display: flex; align-items: center; justify-content: center;
-          width: 42px; height: 42px; border-radius: 999px;
-          border: 1px solid rgba(109,120,151,0.24);
-          background: rgba(17,21,29,0.92); color: #d4dbec;
-          cursor: pointer; font-size: 1.05rem;
-          transition: border-color 180ms, background 180ms, transform 180ms;
-        }
-        .slider-btn:hover { border-color: rgba(121,168,255,0.4); background: rgba(34,40,57,0.94); transform: translateY(-1px); }
+        .slider-tab.active { color: #111827; background: #f3f4f6; }
         .slider-dots { display: flex; align-items: center; gap: 8px; }
         .slider-dot {
           width: 8px; height: 8px; border-radius: 999px; border: none;
           cursor: pointer; padding: 0;
           transition: width 240ms, background 240ms, opacity 240ms;
-          opacity: 0.38; background: #97a1b8;
+          opacity: 0.3; background: #9ca3af;
         }
         .slider-dot.active { width: 26px; opacity: 1; }
+        /* chart entrance animations */
+        @keyframes draw-line {
+          from { stroke-dashoffset: 1600; }
+          to   { stroke-dashoffset: 0; }
+        }
+        @keyframes fade-area {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes pie-appear {
+          from { opacity: 0; transform: scale(0.82); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+        /* slow easing curve for a luxurious draw */
+        .anim-line-slow {
+          animation: draw-line 1800ms cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+          stroke-dasharray: 1600;
+        }
+        .anim-area-slow {
+          animation: fade-area 1200ms cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+          opacity: 0;
+        }
         .slider-heading-row {
           display: flex; align-items: flex-end; justify-content: space-between;
           gap: 24px; margin-bottom: 28px; flex-wrap: wrap;
@@ -389,9 +561,10 @@ export default function DashboardPage() {
         .slider-title {
           margin: 0; font-family: "Cormorant Garamond", serif;
           font-size: clamp(3rem,5vw,5rem); letter-spacing: -0.04em;
-          line-height: 0.92; color: #f7f9ff;
+          line-height: 0.92; color: #111827;
         }
-        .slider-count { font-size: 0.82rem; color: #97a1b8; align-self: flex-end; padding-bottom: 4px; }
+        .slider-count-row { display: flex; align-items: center; gap: 12px; }
+        .slider-count { font-size: 0.82rem; color: #6b7280; padding-bottom: 4px; }
         .slide-viewport { overflow: hidden; min-height: 260px; }
         .slide-content {
           transition: opacity 280ms, transform 280ms;
@@ -413,34 +586,63 @@ export default function DashboardPage() {
         .perf-cards { display: flex; flex-direction: column; gap: 14px; }
         .perf-chart-panel {
           padding: 22px 24px 18px; border-radius: 24px;
-          background: linear-gradient(180deg,rgba(17,21,29,0.96),rgba(10,13,19,0.92));
-          border: 1px solid rgba(121,168,255,0.14);
+          background: #f9fafb;
+          border: 1px solid rgba(17,24,39,0.1);
           display: flex; flex-direction: column; gap: 0;
         }
         .perf-chart-heading { margin: 0 0 2px; font-size: 0.72rem; letter-spacing: 0.14em;
-          text-transform: uppercase; font-weight: 800; color: #97a1b8; }
-        .perf-chart-sub { margin: 0 0 16px; font-size: 0.85rem; font-weight: 700; color: #79a8ff; }
+          text-transform: uppercase; font-weight: 800; color: #6b7280; }
+        .perf-chart-sub { margin: 0 0 16px; font-size: 0.85rem; font-weight: 700; color: #4f7bff; }
+        /* realtime layout: big P&L card left, metric grid right */
+        .rt-layout {
+          display: grid;
+          grid-template-columns: 280px 1fr;
+          gap: 18px;
+          align-items: stretch;
+        }
+        .rt-pnl-card {
+          padding: 28px 28px 22px; border-radius: 24px;
+          background: #f9fafb;
+          border: 1px solid rgba(22,163,74,0.18);
+          display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .rt-pnl-label {
+          margin: 0 0 4px; font-size: 0.72rem; letter-spacing: 0.14em;
+          text-transform: uppercase; font-weight: 800; color: #6b7280;
+        }
+        .rt-pnl-value {
+          font-size: 2.6rem; font-weight: 800; letter-spacing: -0.04em;
+          line-height: 1; color: #16a34a;
+        }
+        .rt-pnl-detail {
+          margin: 4px 0 0; font-size: 0.8rem; color: #6b7280;
+        }
+        .rt-metrics-grid {
+          display: grid; gap: 14px;
+          grid-template-columns: 1fr 1fr;
+          align-content: start;
+        }
         .slide-metric {
           padding: 26px 28px; border-radius: 24px;
-          background: linear-gradient(180deg,rgba(17,21,29,0.96),rgba(10,13,19,0.92));
-          border: 1px solid rgba(108,125,158,0.14);
+          background: #f9fafb;
+          border: 1px solid rgba(17,24,39,0.08);
           display: grid; gap: 8px;
           transition: border-color 200ms, transform 200ms, box-shadow 200ms;
         }
-        .slide-metric:hover { transform: translateY(-3px); box-shadow: 0 12px 36px rgba(0,0,0,0.28); }
+        .slide-metric:hover { transform: translateY(-3px); box-shadow: 0 12px 36px rgba(17,24,39,0.1); }
         .slide-metric-label {
           margin: 0; font-size: 0.72rem; letter-spacing: 0.14em;
-          text-transform: uppercase; font-weight: 800; color: #97a1b8;
+          text-transform: uppercase; font-weight: 800; color: #6b7280;
         }
         .slide-metric-value {
           display: block; margin: 4px 0 2px;
           font-size: 2rem; font-weight: 800; letter-spacing: -0.03em;
           line-height: 1; transition: color 280ms;
         }
-        .slide-metric-detail { margin: 0; font-size: 0.82rem; color: #97a1b8; line-height: 1.55; }
+        .slide-metric-detail { margin: 0; font-size: 0.82rem; color: #6b7280; line-height: 1.55; }
         .slide-progress {
           margin-top: 28px; height: 2px;
-          background: rgba(109,120,151,0.12); border-radius: 999px; overflow: hidden;
+          background: rgba(17,24,39,0.08); border-radius: 999px; overflow: hidden;
         }
         .slide-progress-bar { height: 100%; border-radius: 999px; transition: width 320ms, background 320ms; }
 
@@ -456,10 +658,9 @@ export default function DashboardPage() {
 
         /* ── Holdings table panel ── */
         .holdings-panel {
-          border: 1px solid rgba(109,120,151,0.18);
-          background: rgba(12,15,22,0.88);
-          backdrop-filter: blur(18px);
-          box-shadow: 0 24px 70px rgba(0,0,0,0.38);
+          border: 1px solid rgba(17,24,39,0.1);
+          background: #ffffff;
+          box-shadow: 0 16px 36px rgba(17,24,39,0.08);
           border-radius: 28px;
           overflow: hidden;
           display: flex;
@@ -468,7 +669,7 @@ export default function DashboardPage() {
         }
         .holdings-header {
           padding: 22px 26px 16px;
-          border-bottom: 1px solid rgba(109,120,151,0.12);
+          border-bottom: 1px solid rgba(17,24,39,0.08);
           flex-shrink: 0;
         }
         .holdings-header-top {
@@ -477,14 +678,14 @@ export default function DashboardPage() {
         .holdings-title {
           margin: 0;
           font-family: "Cormorant Garamond", serif;
-          font-size: 1.6rem; letter-spacing: -0.03em; color: #f7f9ff;
+          font-size: 1.6rem; letter-spacing: -0.03em; color: #111827;
         }
         .holdings-count-badge {
           padding: 4px 12px; border-radius: 999px;
-          background: rgba(121,168,255,0.1);
-          border: 1px solid rgba(121,168,255,0.2);
+          background: rgba(79,123,255,0.08);
+          border: 1px solid rgba(79,123,255,0.18);
           font-size: 0.72rem; font-weight: 700;
-          color: #79a8ff; letter-spacing: 0.08em;
+          color: #4f7bff; letter-spacing: 0.08em;
         }
         .holdings-scroll {
           overflow-y: auto;
@@ -493,7 +694,7 @@ export default function DashboardPage() {
         }
         .holdings-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
         .holdings-scroll::-webkit-scrollbar-track { background: transparent; }
-        .holdings-scroll::-webkit-scrollbar-thumb { background: rgba(109,120,151,0.28); border-radius: 999px; }
+        .holdings-scroll::-webkit-scrollbar-thumb { background: rgba(17,24,39,0.15); border-radius: 999px; }
         .holdings-table {
           width: 100%;
           border-collapse: collapse;
@@ -501,9 +702,9 @@ export default function DashboardPage() {
           font-size: 0.82rem;
         }
         .holdings-table thead tr {
-          border-bottom: 1px solid rgba(109,120,151,0.14);
+          border-bottom: 1px solid rgba(17,24,39,0.08);
           position: sticky; top: 0;
-          background: rgba(12,15,22,0.97);
+          background: #ffffff;
           z-index: 2;
         }
         .holdings-table th {
@@ -511,46 +712,45 @@ export default function DashboardPage() {
           text-align: right;
           font-size: 0.68rem; font-weight: 800;
           letter-spacing: 0.12em; text-transform: uppercase;
-          color: #97a1b8; white-space: nowrap;
+          color: #6b7280; white-space: nowrap;
         }
         .holdings-table th:first-child,
         .holdings-table th:nth-child(2),
         .holdings-table th:nth-child(3) { text-align: left; }
         .holdings-table tbody tr {
-          border-bottom: 1px solid rgba(109,120,151,0.07);
+          border-bottom: 1px solid rgba(17,24,39,0.06);
           cursor: pointer;
           transition: background 150ms;
         }
         .holdings-table tbody tr:last-child { border-bottom: none; }
-        .holdings-table tbody tr:hover { background: rgba(121,168,255,0.05); }
-        .holdings-table tbody tr.selected { background: rgba(121,168,255,0.09); }
+        .holdings-table tbody tr:hover { background: #f9fafb; }
+        .holdings-table tbody tr.selected { background: rgba(79,123,255,0.06); }
         .holdings-table td {
           padding: 12px 14px;
           text-align: right;
-          color: #d4dbec;
+          color: #374151;
           white-space: nowrap;
         }
         .holdings-table td:first-child,
         .holdings-table td:nth-child(2),
         .holdings-table td:nth-child(3) { text-align: left; }
-        .td-symbol { font-weight: 800; color: #f2f5fb; font-size: 0.88rem; }
-        .td-company { color: #97a1b8; font-size: 0.78rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+        .td-symbol { font-weight: 800; color: #111827; font-size: 0.88rem; }
+        .td-company { color: #6b7280; font-size: 0.78rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
         .td-label {
           display: inline-block;
           padding: 2px 8px; border-radius: 999px;
           font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em;
-          background: rgba(121,168,255,0.1); color: #79a8ff;
-          border: 1px solid rgba(121,168,255,0.18);
+          background: rgba(79,123,255,0.08); color: #4f7bff;
+          border: 1px solid rgba(79,123,255,0.18);
         }
-        .td-positive { color: #7bd88f; font-weight: 700; }
-        .td-negative { color: #f87171; font-weight: 700; }
+        .td-positive { color: #16a34a; font-weight: 700; }
+        .td-negative { color: #dc2626; font-weight: 700; }
 
         /* ── Trades panel ── */
         .trades-panel {
-          border: 1px solid rgba(109,120,151,0.18);
-          background: rgba(12,15,22,0.88);
-          backdrop-filter: blur(18px);
-          box-shadow: 0 24px 70px rgba(0,0,0,0.38);
+          border: 1px solid rgba(17,24,39,0.1);
+          background: #ffffff;
+          box-shadow: 0 16px 36px rgba(17,24,39,0.08);
           border-radius: 28px;
           overflow: hidden;
           display: flex;
@@ -559,67 +759,68 @@ export default function DashboardPage() {
         }
         .trades-header {
           padding: 22px 26px 16px;
-          border-bottom: 1px solid rgba(109,120,151,0.12);
+          border-bottom: 1px solid rgba(17,24,39,0.08);
           flex-shrink: 0;
           display: flex; align-items: center; justify-content: space-between; gap: 12px;
         }
         .trades-title {
           margin: 0;
           font-family: "Cormorant Garamond", serif;
-          font-size: 1.3rem; letter-spacing: -0.03em; color: #f7f9ff;
+          font-size: 1.3rem; letter-spacing: -0.03em; color: #111827;
           line-height: 1.2;
         }
         .trades-clear-btn {
           padding: 4px 12px; border-radius: 999px;
           background: transparent;
-          border: 1px solid rgba(109,120,151,0.24);
+          border: 1px solid rgba(17,24,39,0.18);
           font-size: 0.7rem; font-weight: 700;
-          color: #97a1b8; cursor: pointer; letter-spacing: 0.06em;
+          color: #6b7280; cursor: pointer; letter-spacing: 0.06em;
           transition: border-color 160ms, color 160ms;
         }
-        .trades-clear-btn:hover { border-color: rgba(121,168,255,0.4); color: #79a8ff; }
+        .trades-clear-btn:hover { border-color: rgba(79,123,255,0.4); color: #4f7bff; }
         .trades-scroll {
           overflow-y: auto; flex: 1;
         }
         .trades-scroll::-webkit-scrollbar { width: 4px; }
         .trades-scroll::-webkit-scrollbar-track { background: transparent; }
-        .trades-scroll::-webkit-scrollbar-thumb { background: rgba(109,120,151,0.28); border-radius: 999px; }
+        .trades-scroll::-webkit-scrollbar-thumb { background: rgba(17,24,39,0.15); border-radius: 999px; }
         .trade-row {
           display: grid;
           grid-template-columns: auto 1fr auto;
           align-items: center;
           gap: 14px;
           padding: 14px 24px;
-          border-bottom: 1px solid rgba(109,120,151,0.07);
+          border-bottom: 1px solid rgba(17,24,39,0.06);
           transition: background 150ms;
         }
         .trade-row:last-child { border-bottom: none; }
-        .trade-row:hover { background: rgba(121,168,255,0.04); }
+        .trade-row:hover { background: #f9fafb; }
         .trade-side-badge {
           width: 48px; text-align: center;
           padding: 4px 0; border-radius: 8px;
           font-size: 0.7rem; font-weight: 800; letter-spacing: 0.1em;
           flex-shrink: 0;
         }
-        .trade-side-badge.buy  { background: rgba(123,216,143,0.12); color: #7bd88f; border: 1px solid rgba(123,216,143,0.22); }
-        .trade-side-badge.sell { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.22); }
+        .trade-side-badge.buy  { background: rgba(22,163,74,0.08); color: #16a34a; border: 1px solid rgba(22,163,74,0.2); }
+        .trade-side-badge.sell { background: rgba(220,38,38,0.08); color: #dc2626; border: 1px solid rgba(220,38,38,0.2); }
         .trade-info { min-width: 0; }
-        .trade-symbol { font-weight: 800; font-size: 0.9rem; color: #f2f5fb; }
-        .trade-company { font-size: 0.75rem; color: #97a1b8; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .trade-meta { font-size: 0.72rem; color: #97a1b8; margin-top: 3px; }
+        .trade-symbol { font-weight: 800; font-size: 0.9rem; color: #111827; }
+        .trade-company { font-size: 0.75rem; color: #6b7280; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trade-meta { font-size: 0.72rem; color: #9ca3af; margin-top: 3px; }
         .trade-right { text-align: right; flex-shrink: 0; }
-        .trade-total { font-weight: 800; font-size: 0.92rem; color: #f2f5fb; }
-        .trade-date { font-size: 0.72rem; color: #97a1b8; margin-top: 2px; }
+        .trade-total { font-weight: 800; font-size: 0.92rem; color: #111827; }
+        .trade-date { font-size: 0.72rem; color: #9ca3af; margin-top: 2px; }
         .trades-empty {
           padding: 48px 24px;
           text-align: center;
-          color: #97a1b8;
+          color: #9ca3af;
           font-size: 0.88rem;
         }
 
         @media (max-width: 1080px) {
           .bottom-panel  { grid-template-columns: 1fr; }
           .perf-layout   { grid-template-columns: 1fr; }
+          .rt-layout     { grid-template-columns: 1fr; }
           .metrics-slider { padding: 28px 24px 24px; }
         }
         @media (max-width: 720px) {
@@ -632,6 +833,15 @@ export default function DashboardPage() {
           TOP — Sliding metrics panel
       ══════════════════════════════════ */}
       <section className="metrics-slider">
+        {/* ← left arrow */}
+        <button className="slider-side-btn" onClick={prev} aria-label="Previous">
+          <span className="chevron">
+            <svg viewBox="0 0 12 12"><polyline points="7.5,2 3.5,6 7.5,10" /></svg>
+          </span>
+        </button>
+
+        {/* inner content */}
+        <div className="slider-main">
         <div className="slider-top-bar">
           <div className="slider-tab-row">
             {CATEGORIES.map((c, idx) => (
@@ -645,8 +855,14 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
-          <div className="slider-nav">
-            <button className="slider-btn" onClick={prev} aria-label="Previous">&#8592;</button>
+        </div>
+
+        <div className="slider-heading-row">
+          <div className="slider-title-block">
+            <p className="slider-eyebrow" style={{ color: cat.accent }}>{cat.eyebrow}</p>
+            <h2 className="slider-title">{cat.label}</h2>
+          </div>
+          <div className="slider-count-row">
             <div className="slider-dots">
               {CATEGORIES.map((c, idx) => (
                 <button
@@ -658,18 +874,10 @@ export default function DashboardPage() {
                 />
               ))}
             </div>
-            <button className="slider-btn" onClick={next} aria-label="Next">&#8594;</button>
+            <span className="slider-count">
+              {String(active + 1).padStart(2, "0")} / {String(CATEGORIES.length).padStart(2, "0")}
+            </span>
           </div>
-        </div>
-
-        <div className="slider-heading-row">
-          <div className="slider-title-block">
-            <p className="slider-eyebrow" style={{ color: cat.accent }}>{cat.eyebrow}</p>
-            <h2 className="slider-title">{cat.label}</h2>
-          </div>
-          <span className="slider-count">
-            {String(active + 1).padStart(2, "0")} / {String(CATEGORIES.length).padStart(2, "0")}
-          </span>
         </div>
 
         <div className="slide-viewport">
@@ -679,7 +887,30 @@ export default function DashboardPage() {
               animating && direction === "right" ? " exiting-right" : ""
             }`}
           >
-            {cat.id === "performance" ? (
+            {cat.id === "realtime" ? (
+              <div className="rt-layout">
+                {/* Left: Today P&L + sparkline */}
+                <div className="rt-pnl-card">
+                  <div>
+                    <p className="rt-pnl-label">Today&apos;s P&amp;L</p>
+                    <span className="rt-pnl-value">{cat.pnl.value}</span>
+                    <p className="rt-pnl-detail">{cat.pnl.detail}</p>
+                  </div>
+                  <PnlSparkline />
+                </div>
+                {/* Right: remaining 5 metrics */}
+                <div className="rt-metrics-grid">
+                  {cat.metrics.map((m) => (
+                    <article key={m.key} className="slide-metric"
+                      style={{ borderColor: cat.accent + "28" }}>
+                      <p className="slide-metric-label">{m.label}</p>
+                      <strong className="slide-metric-value" style={{ color: cat.accent, fontSize: "1.55rem" }}>{m.value}</strong>
+                      <p className="slide-metric-detail">{m.detail}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : cat.id === "performance" ? (
               <div className="perf-layout">
                 {/* Left: 3 metric cards stacked */}
                 <div className="perf-cards">
@@ -697,7 +928,7 @@ export default function DashboardPage() {
                 <div className="perf-chart-panel">
                   <p className="perf-chart-heading">Benchmark Comparisons</p>
                   <p className="perf-chart-sub">Portfolio vs S&amp;P 500 — YTD cumulative return</p>
-                  <BenchmarkChart />
+                  <BenchmarkChart animKey={active} />
                 </div>
               </div>
             ) : (
@@ -721,6 +952,10 @@ export default function DashboardPage() {
             style={{ width: `${((active + 1) / CATEGORIES.length) * 100}%`, background: cat.accent }}
           />
         </div>
+        </div>{/* end slider-main */}
+
+        {/* → right arrow */}
+        <button className="slider-side-btn" onClick={next} aria-label="Next">&#8594;</button>
       </section>
 
       {/* ══════════════════════════════════
