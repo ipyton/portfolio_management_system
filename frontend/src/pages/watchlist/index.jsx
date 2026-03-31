@@ -587,6 +587,7 @@ function WatchlistLayout() {
   const isOverHolding = tradeModal.type === "sell" && numericAmount > holdingLimit;
   const latestPrice = selected?.priceHistory?.[selected.priceHistory.length - 1]?.price || 0;
   const stockCashValue = selected?.holdingShares ? selected.holdingShares * latestPrice : 0;
+  const calculatedCash = tradeAmount ? Number(tradeAmount) * latestPrice : 0;
 
   const filteredRows = rows.filter((row) => {
     if (activeTab === "holdings") return row.isHolding;
@@ -788,6 +789,11 @@ function WatchlistLayout() {
                 }
               }}
             />
+            {tradeAmount && selected?.type === "Stock" && (
+              <p className="modal-cash">
+                Estimated Cash: ${calculatedCash.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </p>
+            )}
             <div className="modal-actions">
               <button
                 type="button"
@@ -799,7 +805,9 @@ function WatchlistLayout() {
                   const verb = tradeModal.type === "sell" ? "sold" : "bought";
                   const unitLabel = selected?.type === "Bond" ? "amount" : "shares";
                   const shareText = tradeAmount ? `${tradeAmount} ${unitLabel}` : "0 shares";
-                  const cashText = tradeCashAmount ? `$${tradeCashAmount}` : "$0";
+                  const cashText = tradeCashAmount
+                    ? `$${tradeCashAmount}`
+                    : `$${calculatedCash.toFixed(2)}`;
                   setConfirmation(
                     `A ${verb} of ${shareText} and ${cashText} of ${
                       selected?.symbol || "stock"
