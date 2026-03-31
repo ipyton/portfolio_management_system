@@ -15,19 +15,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.noah.portfolio.analytics.PortfolioNavDailyEntity;
-import com.noah.portfolio.analytics.PortfolioNavDailyRepository;
-import com.noah.portfolio.asset.AssetPriceDailyRepository;
-import com.noah.portfolio.fx.FxRateService;
+import com.noah.portfolio.analytics.entity.PortfolioNavDailyEntity;
+import com.noah.portfolio.analytics.repository.PortfolioNavDailyRepository;
+import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
+import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.scheduler.config.SchedulerProperties;
-import com.noah.portfolio.trading.CashAccountRepository;
-import com.noah.portfolio.trading.CashTransactionEntity;
-import com.noah.portfolio.trading.CashTransactionRepository;
-import com.noah.portfolio.trading.CashTransactionType;
-import com.noah.portfolio.trading.HoldingEntity;
-import com.noah.portfolio.trading.HoldingRepository;
-import com.noah.portfolio.user.UserEntity;
-import com.noah.portfolio.user.UserRepository;
+import com.noah.portfolio.trading.repository.CashAccountRepository;
+import com.noah.portfolio.trading.entity.CashTransactionEntity;
+import com.noah.portfolio.trading.repository.CashTransactionRepository;
+import com.noah.portfolio.trading.model.CashTransactionType;
+import com.noah.portfolio.trading.entity.HoldingEntity;
+import com.noah.portfolio.trading.repository.HoldingRepository;
+import com.noah.portfolio.user.entity.UserEntity;
+import com.noah.portfolio.user.repository.UserRepository;
 
 @Service
 public class PortfolioNavSnapshotService {
