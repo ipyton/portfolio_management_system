@@ -24,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class AssetSearchService {
 
     private static final int SEARCH_LIMIT = 5;
+    private static final int DEFAULT_SUGGESTION_LIMIT = 8;
+    private static final int MAX_SUGGESTION_LIMIT = 20;
 
     private final AssetSearchDataRepository assetSearchDataRepository;
     private final YahooFinanceClient yahooFinanceClient;
@@ -103,6 +105,15 @@ public class AssetSearchService {
         );
     }
 
+    public AssetSuggestionResponse suggest(String query, Integer limit) {
+        String normalizedQuery = normalizeQuery(query);
+        int normalizedLimit = normalizeSuggestionLimit(limit);
+        List<AssetCandidate> suggestions = assetSearchDataRepository.searchAssets(normalizedQuery, normalizedLimit).stream()
+                .map(this::toCandidate)
+                .toList();
+        return new AssetSuggestionResponse(normalizedQuery, suggestions.size(), suggestions);
+    }
+
     private DatabaseAssetDetail toDatabaseAssetDetail(AssetEntity asset, AssetLatestPriceSnapshot latestPrice) {
         AssetStockDetailEntity stockDetail = asset.getStockDetail();
         AssetEtfDetailEntity etfDetail = asset.getEtfDetail();
@@ -163,11 +174,35 @@ public class AssetSearchService {
         );
     }
 
+    private AssetCandidate toCandidate(AssetEntity asset) {
+        return new AssetCandidate(
+                asset.getId(),
+                asset.getSymbol(),
+                asset.getName(),
+                asset.getAssetType().name(),
+                asset.getExchange(),
+                asset.getRegion()
+        );
+    }
+
     private String normalizeQuery(String query) {
         if (!StringUtils.hasText(query)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Query must not be blank.");
         }
         return query.trim();
+    }
+
+    private int normalizeSuggestionLimit(Integer limit) {
+        if (limit == null) {
+            return DEFAULT_SUGGESTION_LIMIT;
+        }
+        if (limit < 1 || limit > MAX_SUGGESTION_LIMIT) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Limit must be between 1 and " + MAX_SUGGESTION_LIMIT + "."
+            );
+        }
+        return limit;
     }
 
     @SafeVarargs

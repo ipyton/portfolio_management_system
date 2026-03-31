@@ -139,6 +139,8 @@ GET /api/fx/latest?quoteCurrency=USD
 
 ```bash
 GET /api/assets/search?query=AAPL
+GET /api/assets/suggestions?query=App
+GET /api/assets/suggestions?query=App&limit=10
 ```
 
 Behavior:
@@ -146,6 +148,7 @@ Behavior:
 - Search `assets` and related detail tables in MySQL first
 - If a local asset is found, use its `symbol` to enrich the response with Yahoo Finance detail
 - If no local asset is found, resolve the symbol through Yahoo Finance search and return the external detail
+- `GET /api/assets/suggestions` is intended for autocomplete and only returns lightweight local candidates
 
 ## API test scripts
 

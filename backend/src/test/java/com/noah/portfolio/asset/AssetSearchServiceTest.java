@@ -3,6 +3,7 @@ package com.noah.portfolio.asset;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -13,8 +14,61 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.noah.portfolio.asset.client.YahooFinanceClient;
+import com.noah.portfolio.asset.config.YahooFinanceProperties;
+import com.noah.portfolio.asset.dto.AssetSearchResponse;
+import com.noah.portfolio.asset.dto.AssetSuggestionResponse;
+import com.noah.portfolio.asset.dto.YahooFinanceDetail;
+import com.noah.portfolio.asset.dto.YahooFinanceSearchResult;
+import com.noah.portfolio.asset.entity.AssetEntity;
+import com.noah.portfolio.asset.entity.AssetStockDetailEntity;
+import com.noah.portfolio.asset.model.AssetLatestPriceSnapshot;
+import com.noah.portfolio.asset.model.AssetType;
+import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
+import com.noah.portfolio.asset.service.AssetSearchService;
 
 class AssetSearchServiceTest {
+
+    @Test
+    void suggestReturnsDatabaseMatchesWithoutCallingYahooFinance() {
+        AssetEntity apple = asset(
+                1L,
+                "AAPL",
+                AssetType.STOCK,
+                "Apple Inc.",
+                "USD",
+                "NASDAQ",
+                "US",
+                false
+        );
+        AssetEntity applovin = asset(
+                2L,
+                "APP",
+                AssetType.STOCK,
+                "AppLovin Corporation",
+                "USD",
+                "NASDAQ",
+                "US",
+                false
+        );
+
+        StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(
+                List.of(apple, applovin),
+                Map.of()
+        );
+        StubYahooFinanceClient yahooFinanceClient = new StubYahooFinanceClient(Optional.empty(), Optional.empty());
+        AssetSearchService service = new AssetSearchService(repository, yahooFinanceClient);
+
+        AssetSuggestionResponse response = service.suggest("  App  ", 2);
+
+        assertThat(response.query()).isEqualTo("App");
+        assertThat(response.count()).isEqualTo(2);
+        assertThat(response.items()).extracting(item -> item.symbol()).containsExactly("AAPL", "APP");
+        assertThat(repository.lastSearchQuery).isEqualTo("App");
+        assertThat(repository.lastSearchLimit).isEqualTo(2);
+        assertThat(yahooFinanceClient.lastSearchQuery).isNull();
+        assertThat(yahooFinanceClient.lastFetchSymbol).isNull();
+    }
 
     @Test
     void searchUsesDatabaseMatchAndFetchesYahooDetailByDatabaseSymbol() {
@@ -113,7 +167,7 @@ class AssetSearchServiceTest {
             String region,
             boolean benchmark
     ) {
-        AssetEntity asset = new AssetEntity();
+        AssetEntity asset = newInstance(AssetEntity.class);
         setField(asset, "id", id);
         setField(asset, "symbol", symbol);
         setField(asset, "assetType", assetType);
@@ -131,12 +185,22 @@ class AssetSearchServiceTest {
             Long marketCap,
             BigDecimal peRatio
     ) {
-        AssetStockDetailEntity detail = new AssetStockDetailEntity();
+        AssetStockDetailEntity detail = newInstance(AssetStockDetailEntity.class);
         setField(detail, "sector", sector);
         setField(detail, "industry", industry);
         setField(detail, "marketCap", marketCap);
         setField(detail, "peRatio", peRatio);
         return detail;
+    }
+
+    private <T> T newInstance(Class<T> type) {
+        try {
+            var constructor = type.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            return constructor.newInstance();
+        } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private void setField(Object target, String fieldName, Object value) {
@@ -153,6 +217,7 @@ class AssetSearchServiceTest {
         private final List<AssetEntity> assets;
         private final Map<Long, AssetLatestPriceSnapshot> latestPriceSnapshots;
         private String lastSearchQuery;
+        private Integer lastSearchLimit;
 
         private StubAssetSearchDataRepository(
                 List<AssetEntity> assets,
@@ -165,6 +230,7 @@ class AssetSearchServiceTest {
         @Override
         public List<AssetEntity> searchAssets(String query, int limit) {
             this.lastSearchQuery = query;
+            this.lastSearchLimit = limit;
             return assets;
         }
 

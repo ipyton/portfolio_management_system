@@ -1,4 +1,4 @@
-package com.noah.portfolio.asset;
+package com.noah.portfolio.asset.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -11,6 +11,8 @@ import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.noah.portfolio.asset.config.YahooFinanceProperties;
+import com.noah.portfolio.asset.dto.YahooFinanceDetail;
 
 class YahooFinanceClientTest {
 

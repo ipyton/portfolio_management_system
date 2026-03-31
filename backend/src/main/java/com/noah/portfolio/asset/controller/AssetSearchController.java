@@ -36,4 +36,15 @@ public class AssetSearchController {
     ) {
         return assetSearchService.search(query);
     }
+
+    @GetMapping("/suggestions")
+    @Operation(summary = "Suggest assets", description = "Returns lightweight local asset candidates for autocomplete.")
+    public AssetSuggestionResponse suggest(
+            @Parameter(description = "Partial symbol or asset name keyword", example = "App")
+            @RequestParam("query") String query,
+            @Parameter(description = "Maximum number of suggestions to return", example = "8")
+            @RequestParam(name = "limit", required = false) Integer limit
+    ) {
+        return assetSearchService.suggest(query, limit);
+    }
 }
