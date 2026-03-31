@@ -1,0 +1,26 @@
+{
+<<<<<<< HEAD
+  "dependencies": {
+    "yarn": "^1.22.22"
+  }
+}
+=======
+  "name": "portfolio-management-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --mode dev",
+    "build": "vite build --mode dev",
+    "preview": "vite preview --mode dev"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "vite": "^5.4.10"
+  }
+}
+>>>>>>> afdfcfbadbd24e27d3ecdede973ee415ea553257
