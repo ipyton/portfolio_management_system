@@ -15,21 +15,37 @@ export default function TradeModals({
   calculatedCash,
   confirmation,
   setConfirmation,
+  onConfirmTrade,
+  tradeSubmitting,
+  interactionDisabled,
 }) {
+  const hasInput = Boolean(tradeAmount) || Boolean(tradeCashAmount);
+  const disableSubmit =
+    !hasInput
+    || isOverBalance
+    || isOverHolding
+    || tradeSubmitting
+    || interactionDisabled;
+
   return (
     <>
       {tradeModal.open && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
             <h3>{tradeModal.type === "buy" ? "Buy" : "Sell"} Amount</h3>
+            {interactionDisabled && (
+              <div className="modal-warning">
+                Guest mode cannot submit trades. Switch to Logged in to continue.
+              </div>
+            )}
             {tradeModal.type === "buy" && isOverBalance && (
               <div className="modal-warning">
-                Please enter an amount less than your avaliable cash!
+                Please enter an amount less than your available cash.
               </div>
             )}
             {tradeModal.type === "sell" && isOverHolding && (
               <div className="modal-warning">
-                Please enter an amount less than your holding amount!
+                Please enter an amount less than your holding amount.
               </div>
             )}
             {tradeModal.type === "buy" && (
@@ -45,11 +61,6 @@ export default function TradeModals({
                 })}
               </p>
             )}
-            {tradeModal.type === "sell" && selected?.type === "Bond" && (
-              <p className="modal-cash">
-                Bond Value: ${Number(selected.holdingCash || 0).toLocaleString()}
-              </p>
-            )}
             <label className="modal-label" htmlFor="trade-amount">
               Share Amount
             </label>
@@ -62,7 +73,7 @@ export default function TradeModals({
               pattern="[0-9]*"
               placeholder="Enter amount"
               value={tradeAmount}
-              disabled={Boolean(tradeCashAmount)}
+              disabled={Boolean(tradeCashAmount) || tradeSubmitting || interactionDisabled}
               onChange={(event) => {
                 const nextValue = event.target.value.replace(/[^0-9.]/g, "");
                 const sanitized = nextValue.replace(/(\..*)\./g, "$1");
@@ -84,7 +95,7 @@ export default function TradeModals({
               pattern="[0-9]*"
               placeholder="Enter cash amount"
               value={tradeCashAmount}
-              disabled={Boolean(tradeAmount)}
+              disabled={Boolean(tradeAmount) || tradeSubmitting || interactionDisabled}
               onChange={(event) => {
                 const nextValue = event.target.value.replace(/[^0-9.]/g, "");
                 const sanitized = nextValue.replace(/(\..*)\./g, "$1");
@@ -105,25 +116,17 @@ export default function TradeModals({
             <div className="modal-actions">
               <button
                 type="button"
-                onClick={() => {
-                  if (tradeModal.type === "sell" && isOverHolding) {
-                    return;
-                  }
-                  setTradeModal({ open: false, type: null });
-                  const verb = tradeModal.type === "sell" ? "sold" : "bought";
-                  const unitLabel = selected?.type === "Bond" ? "amount" : "shares";
-                  const shareText = tradeAmount ? `${tradeAmount} ${unitLabel}` : "0 shares";
-                  const cashText = tradeCashAmount
-                    ? `$${tradeCashAmount}`
-                    : `$${calculatedCash.toFixed(2)}`;
-                  setConfirmation(
-                    `A ${verb} of ${shareText} and ${cashText} of ${selected?.symbol || "stock"} is confirmed`,
-                  );
-                  setTradeAmount("");
-                  setTradeCashAmount("");
-                }}
+                onClick={() => setTradeModal({ open: false, type: null })}
+                disabled={tradeSubmitting}
               >
-                Done
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={disableSubmit}
+                onClick={onConfirmTrade}
+              >
+                {tradeSubmitting ? "Submitting..." : "Submit"}
               </button>
             </div>
           </div>

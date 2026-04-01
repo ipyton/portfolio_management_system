@@ -12,9 +12,9 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 
 ## Environment variables
 
-- `DB_URL`
-- `DB_USERNAME`
-- `DB_PASSWORD`
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
 - `JPA_DDL_AUTO`
 - `JPA_SHOW_SQL`
 - `SERVER_PORT`
@@ -58,11 +58,35 @@ cd backend
 mvn spring-boot:run
 ```
 
+Default local startup targets a MySQL container on `localhost:3306` with database `mydatabase`, user `myuser`, and password `MyUserPass123`.
+
+If you do not have MySQL running locally, use the built-in H2 integration profile for frontend/backend joint debugging:
+
+```bash
+cd backend
+SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
+```
+
+The `local` profile provides:
+
+- in-memory H2 database seeded with demo portfolio data
+- disabled schedulers and rate limiting
+- Yahoo Finance disabled so asset search stays deterministic
+- H2 console at `http://localhost:8080/h2-console`
+
 Every request must include the configured request key header:
 
 ```text
 X-Request-Key: ef928c10-2da4-4ca6-9b49-dedc912d5b4c
 ```
+
+You can verify the key with:
+
+```bash
+GET /api/auth/verify
+```
+
+`200` means the key is valid. Missing or invalid key returns `403`.
 
 Swagger UI and `/v3/api-docs` are excluded from the request key filter so the documentation page can load normally. The actual business APIs still require the request key, and Swagger UI exposes it through the `Authorize` button.
 

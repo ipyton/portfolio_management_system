@@ -72,7 +72,7 @@ public class CashAccountService {
                 availableAfter,
                 frozenBefore,
                 null,
-                resolveNote(request.note(), "Mock deposit")
+                resolveNote(request.note())
         ));
 
         return toTransferResponse(tx, true);
@@ -113,7 +113,7 @@ public class CashAccountService {
                 availableAfter,
                 frozenBefore,
                 null,
-                resolveNote(request.note(), "Mock withdraw")
+                resolveNote(request.note())
         ));
 
         return toTransferResponse(tx, true);
@@ -252,7 +252,7 @@ public class CashAccountService {
         return value.setScale(SCALE, RoundingMode.HALF_UP);
     }
 
-    private String resolveNote(String note, String fallback) {
-        return StringUtils.hasText(note) ? note.trim() : fallback;
+    private String resolveNote(String note) {
+        return StringUtils.hasText(note) ? note.trim() : null;
     }
 }

@@ -29,7 +29,7 @@ public class AssetSearchController {
     }
 
     @GetMapping("/search")
-    @Operation(summary = "Search asset detail", description = "Search the local database first and enrich the result with Yahoo Finance detail.")
+    @Operation(summary = "Search asset detail", description = "Search the local database first and enrich the result with Finnhub detail.")
     public AssetSearchResponse search(
             @Parameter(description = "Search keyword, typically a symbol or asset name", example = "AAPL")
             @RequestParam("query") String query
@@ -38,7 +38,7 @@ public class AssetSearchController {
     }
 
     @GetMapping("/suggestions")
-    @Operation(summary = "Suggest assets", description = "Returns lightweight local asset candidates for autocomplete.")
+    @Operation(summary = "Suggest assets", description = "Returns autocomplete candidates from local assets and Finnhub.")
     public AssetSuggestionResponse suggest(
             @Parameter(description = "Partial symbol or asset name keyword", example = "App")
             @RequestParam("query") String query,
@@ -46,5 +46,29 @@ public class AssetSearchController {
             @RequestParam(name = "limit", required = false) Integer limit
     ) {
         return assetSearchService.suggest(query, limit);
+    }
+
+    @GetMapping("/recommendations")
+    @Operation(summary = "Recommend assets by risk profile", description = "Returns ranked and weighted basket candidates by profile.")
+    public AssetRecommendationResponse recommend(
+            @Parameter(description = "Risk profile: conservative, balanced, aggressive", example = "balanced")
+            @RequestParam("profile") String profile,
+            @Parameter(description = "Maximum number of recommendation items", example = "6")
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @Parameter(description = "Lookback window in days for scoring metrics", example = "180")
+            @RequestParam(name = "lookbackDays", required = false) Integer lookbackDays
+    ) {
+        return assetSearchService.recommend(profile, limit, lookbackDays);
+    }
+
+    @GetMapping("/price-history")
+    @Operation(summary = "Get asset price history", description = "Returns recent daily close series from database first; A-share symbols use Eastmoney, others use Twelve Data.")
+    public AssetPriceHistoryResponse priceHistory(
+            @Parameter(description = "Asset symbol or name", example = "AAPL")
+            @RequestParam("query") String query,
+            @Parameter(description = "Lookback window in days", example = "30")
+            @RequestParam(name = "days", required = false) Integer days
+    ) {
+        return assetSearchService.priceHistory(query, days);
     }
 }

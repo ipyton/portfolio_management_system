@@ -121,9 +121,20 @@ public class YahooFinanceClient {
     }
 
     public Optional<BigDecimal> fetchRegularMarketPrice(String symbol) {
-        return fetchDetail(symbol)
-                .map(YahooFinanceDetail::regularMarketPrice)
-                .filter(price -> price != null);
+        if (!properties.isEnabled()) {
+            return Optional.empty();
+        }
+
+        try {
+            JsonNode quoteRoot = getJson(uriBuilder -> uriBuilder
+                    .path(QUOTE_PATH)
+                    .queryParam("symbols", symbol)
+                    .build());
+            JsonNode quote = findQuoteNode(quoteRoot.path("quoteResponse").path("result"), symbol);
+            return Optional.ofNullable(decimal(quote, "regularMarketPrice"));
+        } catch (IOException | RestClientException ex) {
+            throw new YahooFinanceLookupException("Failed to fetch Yahoo Finance quote price for symbol: " + symbol, ex);
+        }
     }
 
     Optional<YahooFinanceDetail> buildDetail(String symbol, JsonNode quoteRoot, JsonNode summaryRoot) {

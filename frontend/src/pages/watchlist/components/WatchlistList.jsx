@@ -14,6 +14,7 @@ export default function WatchlistList({
   onRankingOrderChange,
   rankingHorizon,
   onRankingHorizonChange,
+  showBondTab,
 }) {
   const [openReturnSymbol, setOpenReturnSymbol] = useState(null);
 
@@ -48,13 +49,15 @@ export default function WatchlistList({
         >
           Stocks
         </button>
-        <button
-          className={activeTab === "bonds" ? "active" : ""}
-          type="button"
-          onClick={() => onTabChange("bonds")}
-        >
-          Bonds
-        </button>
+        {showBondTab && (
+          <button
+            className={activeTab === "bonds" ? "active" : ""}
+            type="button"
+            onClick={() => onTabChange("bonds")}
+          >
+            Bonds
+          </button>
+        )}
         <button
           className={`tab-spacer ranking-button${showRankings ? " active" : ""}`}
           type="button"

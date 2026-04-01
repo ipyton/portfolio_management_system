@@ -24,7 +24,7 @@ export default function WatchlistSearch({
         <div className="search-suggestions" role="listbox">
           {suggestionRows.map((row) => (
             <button
-              key={row.symbol}
+              key={`${row.symbol}-${row.assetId ?? "remote"}`}
               type="button"
               className="search-suggestion"
               onClick={() => onSuggestionSelect(row)}

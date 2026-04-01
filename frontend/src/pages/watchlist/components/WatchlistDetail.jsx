@@ -12,6 +12,9 @@ export default function WatchlistDetail({
   selected,
   onToggleFavourite,
   onTrade,
+  onRemove,
+  isRemoving,
+  interactionDisabled,
 }) {
   const chartData = useMemo(() => selected?.priceHistory ?? [], [selected]);
 
@@ -66,22 +69,31 @@ export default function WatchlistDetail({
         </ResponsiveContainer>
       </div>
       <div className="stats-grid">
+        <div className="stat">Name: {selected.name || selected.symbol}</div>
         <div className="stat">Return: {selected.returnPct}</div>
         <div className="stat">Investment Horizon: {selected.horizon}</div>
         <div className="stat">Sharp Ratio: {selected.sharpe}</div>
         <div className="stat">Max Drawdown: {selected.drawdown}</div>
       </div>
       <div className="action-row">
-        <button type="button" onClick={() => onTrade("buy")}>
+        <button type="button" onClick={() => onTrade("buy")} disabled={interactionDisabled}>
           Buy
         </button>
-        <button type="button" onClick={() => onTrade("sell")}>
+        <button type="button" onClick={() => onTrade("sell")} disabled={interactionDisabled}>
           Sell
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={Boolean(isRemoving) || interactionDisabled}
+        >
+          {isRemoving ? "Removing..." : "Remove"}
         </button>
         <button
           type="button"
           className={`icon-btn${selected.isFavourite ? " is-favourite" : ""}`}
           aria-label="Favourite"
+          disabled={interactionDisabled}
           onClick={() => onToggleFavourite(selected.symbol)}
         >
           {selected.isFavourite ? "★" : "☆"}

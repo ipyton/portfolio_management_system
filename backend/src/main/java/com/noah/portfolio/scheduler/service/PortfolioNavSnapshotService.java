@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -93,16 +94,19 @@ public class PortfolioNavSnapshotService {
         BigDecimal holdingValue = holdings.stream()
                 .map(holding -> {
                     AssetPriceDailyRepository.AssetLatestPriceView latestPrice = latestPricesByAssetId.get(holding.getAsset().getId());
-                    BigDecimal price = latestPrice == null || latestPrice.getClose() == null
-                            ? holding.getAvgCost()
-                            : latestPrice.getClose();
+                    if (latestPrice == null || latestPrice.getClose() == null) {
+                        return null;
+                    }
+                    BigDecimal price = latestPrice.getClose();
                     BigDecimal nativeValue = normalize(holding.getQuantity().multiply(price));
-                    return convertOrFallback(nativeValue, holding.getAsset().getCurrency(), reportingCurrency);
+                    return convertIfAvailable(nativeValue, holding.getAsset().getCurrency(), reportingCurrency);
                 })
+                .filter(Objects::nonNull)
                 .reduce(zero(), BigDecimal::add);
 
         BigDecimal cashValue = cashAccountRepository.findByUserIdOrderByCurrencyAsc(user.getId()).stream()
-                .map(account -> convertOrFallback(account.getBalance(), account.getCurrency(), reportingCurrency))
+                .map(account -> convertIfAvailable(account.getBalance(), account.getCurrency(), reportingCurrency))
+                .filter(Objects::nonNull)
                 .reduce(zero(), BigDecimal::add);
 
         BigDecimal totalValue = normalize(holdingValue.add(cashValue));
@@ -135,15 +139,17 @@ public class PortfolioNavSnapshotService {
         Instant endExclusive = navDate.plusDays(1).atStartOfDay(zoneId).toInstant();
         BigDecimal externalFlow = cashTransactionRepository.findSuccessfulTransactionsInWindow(
                         userId,
-                        List.of(CashTransactionType.DEPOSIT, CashTransactionType.WITHDRAW, CashTransactionType.DIVIDEND),
+                        // Business rule: dividends are treated as investment return, not external cash flow.
+                        List.of(CashTransactionType.DEPOSIT, CashTransactionType.WITHDRAW),
                         startInclusive,
                         endExclusive
                 ).stream()
-                .map(tx -> convertOrFallback(
+                .map(tx -> convertIfAvailable(
                         tx.getAmount() == null ? zero() : tx.getAmount(),
                         tx.getCurrency(),
                         reportingCurrency
                 ))
+                .filter(Objects::nonNull)
                 .reduce(zero(), BigDecimal::add);
 
         BigDecimal numerator = totalValue.subtract(previousSnapshot.get().getTotalValue()).subtract(externalFlow);
@@ -164,10 +170,10 @@ public class PortfolioNavSnapshotService {
         return normalize(previousNetValue.multiply(BigDecimal.ONE.add(dailyReturn)));
     }
 
-    private BigDecimal convertOrFallback(BigDecimal amount, String fromCurrency, String reportingCurrency) {
+    private BigDecimal convertIfAvailable(BigDecimal amount, String fromCurrency, String reportingCurrency) {
         return fxRateService.convert(amount, fromCurrency, reportingCurrency)
-                .orElse(amount)
-                .setScale(SCALE, RoundingMode.HALF_UP);
+                .map(value -> value.setScale(SCALE, RoundingMode.HALF_UP))
+                .orElse(null);
     }
 
     private BigDecimal normalize(BigDecimal value) {
