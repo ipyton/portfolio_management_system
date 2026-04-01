@@ -61,7 +61,8 @@ export default function App() {
     <div className="app-shell">
       <div className="ambient ambient-a" />
       <div className="ambient ambient-b" />
-
+      
+      /* The navigation bar we 
       <Topbar
         navItems={NAV_ITEMS}
         activePage={activePage}
