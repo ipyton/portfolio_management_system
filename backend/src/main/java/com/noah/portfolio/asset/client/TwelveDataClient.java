@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -24,6 +25,7 @@ import com.noah.portfolio.asset.dto.AssetPriceHistoryItem;
 public class TwelveDataClient {
 
     private static final String TIME_SERIES_PATH = "/time_series";
+    private static final String PRICE_PATH = "/price";
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -94,6 +96,32 @@ public class TwelveDataClient {
             return items;
         } catch (IOException | RestClientException ex) {
             throw new TwelveDataLookupException("Failed to fetch Twelve Data history for symbol: " + symbol, ex);
+        }
+    }
+
+    public Optional<BigDecimal> fetchRegularMarketPrice(String symbol) {
+        if (!properties.isEnabled() || !StringUtils.hasText(properties.getApiKey())) {
+            return Optional.empty();
+        }
+
+        try {
+            String response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(PRICE_PATH)
+                            .queryParam("symbol", symbol)
+                            .queryParam("apikey", properties.getApiKey())
+                            .build())
+                    .retrieve()
+                    .body(String.class);
+            JsonNode root = objectMapper.readTree(response);
+
+            if ("error".equalsIgnoreCase(text(root, "status"))) {
+                throw new TwelveDataLookupException("Twelve Data error: " + text(root, "message"), null);
+            }
+
+            return Optional.ofNullable(decimal(text(root, "price")));
+        } catch (IOException | RestClientException ex) {
+            throw new TwelveDataLookupException("Failed to fetch Twelve Data quote price for symbol: " + symbol, ex);
         }
     }
 

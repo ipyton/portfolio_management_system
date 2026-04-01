@@ -9,28 +9,27 @@ import {
 
 export const analysisPageMeta = {
   eyebrow: "Strategy Analysis",
-  title: "Shape a portfolio plan before committing capital.",
-  description:
-    "Choose your investment intent, get a suggested basket, then run a quick historical backtest.",
+  title: "Build and test a portfolio quickly.",
+  description: "Select a profile, build a basket, then run analysis.",
   metrics: [],
 };
 
 const PROFILE_PRESETS = {
   conservative: {
     label: "Conservative",
-    description: "Lower volatility, benchmark-heavy allocation.",
+    description: "Lower risk, benchmark tilt.",
     seeds: ["SPX", "MSFT", "AAPL"],
     weights: [0.5, 0.3, 0.2],
   },
   balanced: {
     label: "Balanced",
-    description: "Blend growth and stability with broad diversification.",
+    description: "Diversified growth.",
     seeds: ["AAPL", "MSFT", "NVDA"],
     weights: [0.34, 0.33, 0.33],
   },
   aggressive: {
     label: "Aggressive",
-    description: "Higher beta tilt with concentrated growth exposure.",
+    description: "Higher risk, growth tilt.",
     seeds: ["NVDA", "TSLA", "AAPL"],
     weights: [0.45, 0.35, 0.2],
   },
@@ -54,8 +53,8 @@ function BacktestChart({ points }) {
   if (!points?.length) {
     return (
       <div className="history-empty">
-        <strong>No backtest series</strong>
-        <p>Add assets and run backtest to render portfolio NAV history.</p>
+        <strong>No backtest data</strong>
+        <p>Run backtest.</p>
       </div>
     );
   }
@@ -67,8 +66,8 @@ function BacktestChart({ points }) {
   if (!values.length) {
     return (
       <div className="history-empty">
-        <strong>No valid values</strong>
-        <p>Backtest data returned invalid NAV points.</p>
+        <strong>Invalid backtest data</strong>
+        <p>Try again.</p>
       </div>
     );
   }
@@ -106,8 +105,8 @@ function SimulationChart({ meanPath, samplePaths }) {
   if (!meanPath?.length) {
     return (
       <div className="history-empty">
-        <strong>No simulation path</strong>
-        <p>Run Wiener simulation to render projected portfolio paths.</p>
+        <strong>No simulation data</strong>
+        <p>Run simulation.</p>
       </div>
     );
   }
@@ -123,8 +122,8 @@ function SimulationChart({ meanPath, samplePaths }) {
   if (!values.length) {
     return (
       <div className="history-empty">
-        <strong>No valid simulation values</strong>
-        <p>Projected path contains invalid points.</p>
+        <strong>Invalid simulation data</strong>
+        <p>Try again.</p>
       </div>
     );
   }
@@ -166,7 +165,7 @@ function EfficientFrontierChart({ points, optimal }) {
     return (
       <div className="history-empty">
         <strong>No efficient frontier</strong>
-        <p>Run Sharpe optimization to generate random portfolio cloud.</p>
+        <p>Run optimization.</p>
       </div>
     );
   }
@@ -179,8 +178,8 @@ function EfficientFrontierChart({ points, optimal }) {
   if (!vols.length || !rets.length) {
     return (
       <div className="history-empty">
-        <strong>No valid frontier points</strong>
-        <p>Generated portfolios contain invalid volatility/return values.</p>
+        <strong>Invalid frontier data</strong>
+        <p>Try again.</p>
       </div>
     );
   }
@@ -441,11 +440,15 @@ export default function AnalysisPage({ meta }) {
   const [sharpeResult, setSharpeResult] = useState(null);
 
   const profilePreset = profile ? PROFILE_PRESETS[profile] : null;
+  const basketSymbolSet = useMemo(
+    () => new Set(basket.map((item) => (item.symbol || "").toUpperCase())),
+    [basket],
+  );
 
   useEffect(() => {
     let cancelled = false;
     const keyword = query.trim();
-    if (!keyword || !profile) {
+    if (!keyword) {
       setSuggestions([]);
       return undefined;
     }
@@ -474,7 +477,7 @@ export default function AnalysisPage({ meta }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, profile]);
+  }, [query]);
 
   const normalizedBasket = useMemo(() => {
     if (!basket.length) {
@@ -488,15 +491,15 @@ export default function AnalysisPage({ meta }) {
     return basket.map((item) => ({ ...item, weight: Number(item.weight || 0) / totalWeight }));
   }, [basket]);
 
-  async function generateRecommendations() {
-    if (!profilePreset) {
+  async function generateRecommendations(preset = profilePreset) {
+    if (!preset) {
       return;
     }
     setRecommendationLoading(true);
     setBacktestError("");
     try {
       const responseList = await Promise.all(
-        profilePreset.seeds.map((seed) =>
+        preset.seeds.map((seed) =>
           apiFetch(`/api/assets/suggestions?query=${encodeURIComponent(seed)}&limit=4`),
         ),
       );
@@ -516,18 +519,20 @@ export default function AnalysisPage({ meta }) {
 
       const picked = merged.slice(0, 5).map((item, index) => ({
         ...item,
-        targetWeight: profilePreset.weights[index] ?? Math.max(0.1, 1 / Math.max(1, merged.length)),
+        targetWeight: preset.weights[index] ?? Math.max(0.1, 1 / Math.max(1, merged.length)),
       }));
 
       setRecommendations(picked);
-      if (!normalizedBasket.length && picked.length) {
-        const initial = picked.slice(0, 3).map((item) => ({
+      setBasket((current) => {
+        if (current.length || !picked.length) {
+          return current;
+        }
+        return picked.slice(0, 3).map((item) => ({
           symbol: item.symbol,
           name: item.name,
           weight: item.targetWeight,
         }));
-        setBasket(initial);
-      }
+      });
     } catch (error) {
       setRecommendations([]);
       setBacktestError(error.message);
@@ -535,6 +540,29 @@ export default function AnalysisPage({ meta }) {
       setRecommendationLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!profilePreset) {
+      setRecommendations([]);
+      return;
+    }
+    generateRecommendations(profilePreset);
+  }, [profilePreset]);
+
+  useEffect(() => {
+    setBacktestResult(null);
+    setSimulationResult(null);
+    setSharpeResult(null);
+  }, [basket]);
+
+  useEffect(() => {
+    setBacktestResult(null);
+    setSharpeResult(null);
+  }, [windowDays]);
+
+  useEffect(() => {
+    setSimulationResult(null);
+  }, [simulationSteps, simulationPaths]);
 
   function addToBasket(item) {
     const symbol = (item.symbol || "").toUpperCase();
@@ -551,6 +579,20 @@ export default function AnalysisPage({ meta }) {
 
   function removeFromBasket(symbol) {
     setBasket((current) => current.filter((item) => item.symbol !== symbol));
+  }
+
+  function clearBasket() {
+    setBasket([]);
+  }
+
+  function rebalanceEqualWeights() {
+    setBasket((current) => {
+      if (!current.length) {
+        return current;
+      }
+      const equal = 1 / current.length;
+      return current.map((item) => ({ ...item, weight: equal }));
+    });
   }
 
   async function loadAlignedSeries(historyDays) {
@@ -613,7 +655,7 @@ export default function AnalysisPage({ meta }) {
   }
 
   async function runBacktest() {
-    if (!profile || !normalizedBasket.length) {
+    if (!normalizedBasket.length) {
       return;
     }
     setBacktestLoading(true);
@@ -669,7 +711,7 @@ export default function AnalysisPage({ meta }) {
   }
 
   async function runWienerSimulation() {
-    if (!profile || !normalizedBasket.length) {
+    if (!normalizedBasket.length) {
       return;
     }
 
@@ -724,7 +766,7 @@ export default function AnalysisPage({ meta }) {
   }
 
   async function runSharpeOptimization() {
-    if (!profile || !normalizedBasket.length) {
+    if (!normalizedBasket.length) {
       return;
     }
 
@@ -807,11 +849,11 @@ export default function AnalysisPage({ meta }) {
           </div>
           <div className="hero-status-card">
             <span>Analysis State</span>
-            <strong>{profile ? "Profile selected" : "Select profile"}</strong>
+            <strong>{profile ? "Ready" : "No profile"}</strong>
             <p>
               {profile
-                ? `${PROFILE_PRESETS[profile].label}: ${PROFILE_PRESETS[profile].description}`
-                : "Pick investment intent first, then generate recommendations and run backtest."}
+                ? `${PROFILE_PRESETS[profile].label} profile selected.`
+                : "You can search and build basket directly."}
             </p>
           </div>
         </div>
@@ -819,18 +861,18 @@ export default function AnalysisPage({ meta }) {
         <div className="hero-metrics">
           <article className="hero-metric">
             <span>Profile</span>
-            <strong>{profile ? PROFILE_PRESETS[profile].label : "Not selected"}</strong>
-            <p>Required before recommendation/backtest.</p>
+            <strong>{profile ? PROFILE_PRESETS[profile].label : "Optional"}</strong>
+            <p>For quick suggestions</p>
           </article>
           <article className="hero-metric">
             <span>Basket Size</span>
             <strong>{basket.length}</strong>
-            <p>Assets currently included in backtest basket.</p>
+            <p>Selected assets</p>
           </article>
           <article className="hero-metric">
             <span>Backtest Window</span>
             <strong>{windowDays} days</strong>
-            <p>Daily close from existing `/api/assets/price-history` API.</p>
+            <p>History range</p>
           </article>
         </div>
       </section>
@@ -838,8 +880,8 @@ export default function AnalysisPage({ meta }) {
       <section className="watchlist-shell watchlist-component analysis-shell">
         <div className="watchlist-header">
           <div>
-            <p className="eyebrow">Step 1</p>
-            <h2 className="watchlist-title">Choose investment intent</h2>
+            <p className="eyebrow">Setup</p>
+            <h2 className="watchlist-title">Build Basket</h2>
           </div>
           <div className="analysis-actions">
             <button
@@ -848,7 +890,7 @@ export default function AnalysisPage({ meta }) {
               disabled={!profile || recommendationLoading}
               onClick={generateRecommendations}
             >
-              {recommendationLoading ? "Generating..." : "Generate Recommendations"}
+              {recommendationLoading ? "Refreshing..." : "Refresh Suggestions"}
             </button>
           </div>
         </div>
@@ -875,33 +917,38 @@ export default function AnalysisPage({ meta }) {
             </div>
             {!profile ? (
               <EmptyState
-                title="Select profile first"
-                description="Recommendation engine unlocks after investment intent is selected."
+                title="Suggestions unavailable"
+                description="Select a profile to auto-generate."
               />
             ) : !recommendations.length ? (
               <EmptyState
                 title="No recommendations yet"
-                description="Click Generate Recommendations to build a candidate basket."
+                description="Click Refresh Suggestions."
               />
             ) : (
               <div className="watchlist-table">
-                {recommendations.map((item) => (
-                  <button
-                    key={`${item.symbol}-${item.assetId ?? "remote"}`}
-                    type="button"
-                    className="watchlist-row"
-                    onClick={() => addToBasket(item)}
-                  >
-                    <div>
-                      <strong className="ticker">{item.symbol}</strong>
-                      <p>{item.name}</p>
-                    </div>
-                    <div>
-                      <strong>{Math.round((item.targetWeight || 0) * 100)}%</strong>
-                      <p>Target Weight</p>
-                    </div>
-                  </button>
-                ))}
+                {recommendations.map((item) => {
+                  const symbol = (item.symbol || "").toUpperCase();
+                  const added = basketSymbolSet.has(symbol);
+                  return (
+                    <button
+                      key={`${item.symbol}-${item.assetId ?? "remote"}`}
+                      type="button"
+                      className={`watchlist-row${added ? " selected" : ""}`}
+                      onClick={() => addToBasket(item)}
+                      disabled={added}
+                    >
+                      <div>
+                        <strong className="ticker">{item.symbol}</strong>
+                        <p>{item.name}</p>
+                      </div>
+                      <div>
+                        <strong>{added ? "Added" : `${Math.round((item.targetWeight || 0) * 100)}%`}</strong>
+                        <p>{added ? "In basket" : "Weight"}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -915,32 +962,44 @@ export default function AnalysisPage({ meta }) {
                   type="text"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={profile ? "Search symbol to add to basket" : "Select profile first"}
-                  disabled={!profile}
+                  placeholder="Search symbol to add"
                 />
               </label>
-              {!profile ? (
-                <EmptyState
-                  title="Profile required"
-                  description="Select Conservative, Balanced, or Aggressive first."
-                />
-              ) : !query.trim() ? (
+              {!query.trim() ? (
                 <EmptyState
                   title="Type to search"
-                  description="Suggestions are powered by `/api/assets/suggestions`."
+                  description="Search symbol or name."
+                />
+              ) : searching ? (
+                <EmptyState
+                  title="Searching"
+                  description="Loading suggestions..."
+                />
+              ) : !suggestions.length ? (
+                <EmptyState
+                  title="No results"
+                  description="Try another keyword."
                 />
               ) : (
-                suggestions.map((item) => (
-                  <button
-                    key={`${item.symbol}-suggest`}
-                    type="button"
-                    className="search-result"
-                    onClick={() => addToBasket(item)}
-                  >
-                    <strong>{item.symbol}</strong>
-                    <span>{item.name}</span>
-                  </button>
-                ))
+                suggestions.map((item) => {
+                  const symbol = (item.symbol || "").toUpperCase();
+                  const added = basketSymbolSet.has(symbol);
+                  return (
+                    <button
+                      key={`${item.symbol}-suggest`}
+                      type="button"
+                      className={`search-result${added ? " added" : ""}`}
+                      onClick={() => addToBasket(item)}
+                      disabled={added}
+                    >
+                      <div className="search-result-main">
+                        <strong>{item.symbol}</strong>
+                        <span>{item.name}</span>
+                      </div>
+                      <span className="search-result-action">{added ? "Added" : "Add"}</span>
+                    </button>
+                  );
+                })
               )}
             </div>
           </section>
@@ -950,11 +1009,29 @@ export default function AnalysisPage({ meta }) {
               <span>Backtest Basket</span>
               <strong>{normalizedBasket.length} assets</strong>
             </div>
+            <div className="analysis-actions">
+              <button
+                type="button"
+                className="search-button"
+                onClick={rebalanceEqualWeights}
+                disabled={!normalizedBasket.length}
+              >
+                Equal Weight
+              </button>
+              <button
+                type="button"
+                className="search-button"
+                onClick={clearBasket}
+                disabled={!normalizedBasket.length}
+              >
+                Clear
+              </button>
+            </div>
 
             {!normalizedBasket.length ? (
               <EmptyState
                 title="Basket is empty"
-                description="Add symbols from recommendations or search results."
+                description="Add assets from the left."
               />
             ) : (
               <div className="analysis-basket-list">
@@ -981,11 +1058,11 @@ export default function AnalysisPage({ meta }) {
 
             <div className="analysis-controls">
               <label>
-                Backtest Window
+                Window
                 <select
                   value={windowDays}
                   onChange={(event) => setWindowDays(Number(event.target.value))}
-                  disabled={!normalizedBasket.length || !profile}
+                  disabled={!normalizedBasket.length}
                 >
                   {BACKTEST_WINDOWS.map((days) => (
                     <option key={days} value={days}>
@@ -998,7 +1075,7 @@ export default function AnalysisPage({ meta }) {
                 type="button"
                 className="search-button"
                 onClick={runBacktest}
-                disabled={!profile || !normalizedBasket.length || backtestLoading}
+                disabled={!normalizedBasket.length || backtestLoading}
               >
                 {backtestLoading ? "Running..." : "Run Backtest"}
               </button>
@@ -1049,7 +1126,7 @@ export default function AnalysisPage({ meta }) {
             ) : (
               <EmptyState
                 title="Backtest not run"
-                description="After selecting profile and basket, click Run Backtest."
+                description="Click Run Backtest."
               />
             )}
 
@@ -1061,11 +1138,11 @@ export default function AnalysisPage({ meta }) {
 
               <div className="analysis-controls">
                 <label>
-                  Simulation Steps
+                  Steps
                   <select
                     value={simulationSteps}
                     onChange={(event) => setSimulationSteps(Number(event.target.value))}
-                    disabled={!profile || !normalizedBasket.length || simulationLoading}
+                    disabled={!normalizedBasket.length || simulationLoading}
                   >
                     {SIMULATION_STEPS.map((steps) => (
                       <option key={steps} value={steps}>
@@ -1075,11 +1152,11 @@ export default function AnalysisPage({ meta }) {
                   </select>
                 </label>
                 <label>
-                  Monte Carlo Paths
+                  Paths
                   <select
                     value={simulationPaths}
                     onChange={(event) => setSimulationPaths(Number(event.target.value))}
-                    disabled={!profile || !normalizedBasket.length || simulationLoading}
+                    disabled={!normalizedBasket.length || simulationLoading}
                   >
                     {SIMULATION_PATHS.map((paths) => (
                       <option key={paths} value={paths}>
@@ -1092,9 +1169,9 @@ export default function AnalysisPage({ meta }) {
                   type="button"
                   className="search-button"
                   onClick={runWienerSimulation}
-                  disabled={!profile || !normalizedBasket.length || simulationLoading}
+                  disabled={!normalizedBasket.length || simulationLoading}
                 >
-                  {simulationLoading ? "Simulating..." : "Run Wiener Simulation"}
+                  {simulationLoading ? "Simulating..." : "Run Simulation"}
                 </button>
               </div>
 
@@ -1142,7 +1219,7 @@ export default function AnalysisPage({ meta }) {
               ) : (
                 <EmptyState
                   title="Simulation not run"
-                  description="Run Wiener simulation to project correlated portfolio paths."
+                  description="Click Run Simulation."
                 />
               )}
             </div>
@@ -1158,9 +1235,9 @@ export default function AnalysisPage({ meta }) {
                   type="button"
                   className="search-button"
                   onClick={runSharpeOptimization}
-                  disabled={!profile || !normalizedBasket.length || sharpeLoading}
+                  disabled={!normalizedBasket.length || sharpeLoading}
                 >
-                  {sharpeLoading ? "Optimizing..." : "Run Sharpe Optimization"}
+                  {sharpeLoading ? "Optimizing..." : "Run Optimization"}
                 </button>
               </div>
 
@@ -1207,8 +1284,8 @@ export default function AnalysisPage({ meta }) {
                 </>
               ) : (
                 <EmptyState
-                  title="Sharpe optimization not run"
-                  description="Generate random portfolios and locate the highest Sharpe-ratio allocation."
+                  title="Optimization not run"
+                  description="Click Run Optimization."
                 />
               )}
             </div>

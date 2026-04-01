@@ -90,5 +90,5 @@ fx:
   stale-after: ${FX_STALE_AFTER:30m}
   tracked-currencies: ${FX_TRACKED_CURRENCIES:CNY,USD,HKD}
   symbols:
-    USD: ${FX_SYMBOL_USD:USDCNY=X}
-    HKD: ${FX_SYMBOL_HKD:HKDCNY=X}
+    USD: ${FX_SYMBOL_USD:USD/CNY}
+    HKD: ${FX_SYMBOL_HKD:HKD/CNY}
