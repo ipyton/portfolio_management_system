@@ -1289,6 +1289,21 @@ export default function AnalysisPage({ meta }) {
     }
   }
 
+  const stageTabs = [
+    {
+      id: "backtest",
+      label: "Backtest",
+    },
+    {
+      id: "simulation",
+      label: "Simulation",
+    },
+    {
+      id: "optimization",
+      label: "Optimize",
+    },
+  ];
+
   return (
     <>
       <section className="hero-panel analysis-hero">
@@ -1491,37 +1506,25 @@ export default function AnalysisPage({ meta }) {
             </div>
           </section>
 
-          <section className="watchlist-panel detail-panel">
-            <div className="card-head">
-              <span>Analysis Workspace</span>
-              <strong>{normalizedBasket.length} assets</strong>
-            </div>
-
-            <div className="analysis-stage-tabs">
-              <button
-                type="button"
-                className={`analysis-stage-tab${activeSection === "backtest" ? " active" : ""}`}
-                onClick={() => setActiveSection("backtest")}
-              >
-                <strong>Backtest</strong>
-                <span>{backtestResult ? "Done" : "Pending"}</span>
-              </button>
-              <button
-                type="button"
-                className={`analysis-stage-tab${activeSection === "simulation" ? " active" : ""}`}
-                onClick={() => setActiveSection("simulation")}
-              >
-                <strong>Wiener Simulation</strong>
-                <span>{simulationResult ? "Done" : "Pending"}</span>
-              </button>
-              <button
-                type="button"
-                className={`analysis-stage-tab${activeSection === "optimization" ? " active" : ""}`}
-                onClick={() => setActiveSection("optimization")}
-              >
-                <strong>Sharpe Optimization</strong>
-                <span>{sharpeResult ? "Done" : "Pending"}</span>
-              </button>
+          <section className="watchlist-panel detail-panel analysis-workspace">
+            <div className="analysis-workspace-head">
+              <div className="analysis-workspace-title">
+                <span className="analysis-workspace-eyebrow">Analysis Workspace</span>
+                <h3>Run, Compare, Iterate</h3>
+              </div>
+              <div className="analysis-stage-tabs" role="tablist" aria-label="Analysis stages">
+                {stageTabs.map((stage) => (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    className={`analysis-stage-tab${activeSection === stage.id ? " active" : ""}`}
+                    onClick={() => setActiveSection(stage.id)}
+                    aria-selected={activeSection === stage.id}
+                  >
+                    <span className="analysis-stage-name">{stage.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {activeSection === "backtest" ? (
