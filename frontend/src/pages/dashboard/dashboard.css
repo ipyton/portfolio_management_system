@@ -1,5 +1,12 @@
+.dashboard-page {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
 .dashboard-metrics-slider {
   position: relative;
+  min-width: 0;
   /* Shared tokens for this page module */
   --card-border: 1px solid rgba(17, 24, 39, 0.1);
   --card-bg: #ffffff;
@@ -29,16 +36,17 @@
   border: var(--card-border);
   background: var(--card-bg);
   box-shadow: var(--card-shadow);
-  border-radius: 28px;
-  padding: 18px;
+  border-radius: 22px;
+  padding: 14px;
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 /* Fixed round navigation buttons */
 .metrics-nav-btn {
   position: absolute;
-  top: 240px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 34px;
   height: 34px;
   border-radius: 999px;
@@ -52,21 +60,25 @@
   box-shadow: 0 8px 22px rgba(17, 24, 39, 0.16);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 180ms ease;
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .metrics-nav-btn-left {
-  left: -50px;
+  left: 12px;
 }
 
 .metrics-nav-btn-right {
-  right: -50px;
+  right: 12px;
 }
 
 .dashboard-metrics-slider:hover .metrics-nav-btn,
 .dashboard-metrics-slider:focus-within .metrics-nav-btn {
   opacity: 1;
   pointer-events: auto;
+}
+
+.dashboard-metrics-slider:hover .metrics-nav-btn {
+  transform: translateY(-50%) scale(1.02);
 }
 
 .metrics-nav-icon {
@@ -101,7 +113,9 @@
   border-radius: 999px;
   background: var(--card-bg);
   color: var(--muted-text);
-  padding: 8px 14px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  line-height: 1.2;
   font-weight: 700;
   cursor: pointer;
 }
@@ -113,8 +127,8 @@
 .slider-heading-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 16px;
+  align-items: flex-end;
+  gap: 12px;
 }
 
 .slider-eyebrow {
@@ -127,9 +141,9 @@
 
 .slider-title {
   margin: 4px 0 0;
-  font-size: 2rem;
+  font-size: clamp(1.32rem, 2.5vw, 1.72rem);
   color: #111827;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
 }
 
 .slider-count-row {
@@ -159,12 +173,157 @@
   letter-spacing: 0.08em;
 }
 
+.slider-panel-viewport {
+  min-width: 0;
+}
+
+.slider-panel-motion {
+  animation: slider-panel-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes slider-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(14px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 /* Slider progress */
 .slide-progress {
-  height: 6px;
+  height: 4px;
   background: #e5e7eb;
   border-radius: 999px;
   overflow: hidden;
+}
+
+.dashboard-page .hero-panel {
+  gap: 18px;
+}
+
+.dashboard-page .hero-status-card {
+  min-width: min(280px, 100%);
+  max-width: 320px;
+  padding: 16px 18px;
+  border-radius: 20px;
+}
+
+.dashboard-page .hero-metrics {
+  gap: 12px;
+}
+
+.dashboard-page .hero-metric {
+  min-width: 0;
+  overflow: hidden;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border-color: rgba(108, 125, 158, 0.18);
+}
+
+.dashboard-page .hero-metric span {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+}
+
+.dashboard-page .hero-metric strong {
+  margin: 6px 0 4px;
+  font-size: clamp(1.08rem, 1.8vw, 1.38rem);
+  line-height: 1.12;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-page .hero-metric p {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-page .slide-card-grid,
+.dashboard-page .rt-layout,
+.dashboard-page .perf-layout,
+.dashboard-page .holdings-dist-layout,
+.dashboard-page .rt-metrics-grid,
+.dashboard-page .perf-cards,
+.dashboard-page .holdings-dist-cards {
+  min-width: 0;
+}
+
+.dashboard-page .slide-card-grid {
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+}
+
+.dashboard-page .slide-metric {
+  min-width: 0;
+  overflow: hidden;
+  padding: 14px 15px;
+  border-radius: 16px;
+  gap: 6px;
+}
+
+.dashboard-page .slide-metric-label {
+  font-size: 0.64rem;
+  letter-spacing: 0.11em;
+}
+
+.dashboard-page .slide-metric-value {
+  margin: 2px 0;
+  max-width: 100%;
+  font-size: clamp(0.98rem, 1.7vw, 1.28rem);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-page .slide-metric-detail {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dashboard-page .rt-layout {
+  grid-template-columns: minmax(0, 250px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.dashboard-page .rt-pnl-card {
+  padding: 18px 16px 14px;
+  border-radius: 16px;
+}
+
+.dashboard-page .rt-pnl-value {
+  max-width: 100%;
+  font-size: clamp(1.35rem, 2.7vw, 1.82rem);
+  line-height: 1.08;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-page .perf-layout {
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.dashboard-page .holdings-dist-layout {
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.dashboard-page .perf-chart-panel,
+.dashboard-page .holdings-pie-panel {
+  padding: 16px 18px 14px;
+  border-radius: 16px;
 }
 
 .slide-progress-bar {
@@ -241,6 +400,18 @@
 
 /* Responsive */
 @media (max-width: 1080px) {
+  .dashboard-page .hero-heading-row {
+    display: grid;
+  }
+
+  .dashboard-page .hero-status-card {
+    max-width: none;
+  }
+
+  .dashboard-page .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+
   .stock-bottom-grid {
     grid-template-columns: 1fr;
   }
@@ -252,13 +423,14 @@
   }
 
   .slider-title {
-    font-size: 1.6rem;
+    font-size: 1.4rem;
   }
 
   .metrics-nav-btn {
     width: 30px;
     height: 30px;
-    top: 24px;
+    top: 18px;
+    transform: none;
   }
 
   .metrics-nav-btn-left {
@@ -268,11 +440,24 @@
   .metrics-nav-btn-right {
     right: 10px;
   }
+
+  .dashboard-page .slide-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
 }
 
 @media (hover: none) {
   .metrics-nav-btn {
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metrics-nav-btn,
+  .slide-progress-bar,
+  .slider-panel-motion {
+    transition: none;
+    animation: none;
   }
 }

@@ -1,6 +1,13 @@
 import React from "react";
 
-export default function IntroCard({ meta, activityFeed, isLoggedIn }) {
+export default function IntroCard({ meta, activityFeed, isLoggedIn, status }) {
+  const statusHeading = status?.heading
+    || (isLoggedIn ? "Workflow oversight is active" : "Previewing board");
+  const statusMessage = status?.message
+    || (isLoggedIn
+      ? "Use this page to watch approvals, queues, and ingestion health in one place."
+      : "Guest mode keeps the interface visible while live actions stay disabled.");
+
   // Render the reserved top introduction panel.
   return (
     <section className="hero-panel">
@@ -12,12 +19,8 @@ export default function IntroCard({ meta, activityFeed, isLoggedIn }) {
         </div>
         <div className="hero-status-card">
           <span>Ops Status</span>
-          <strong>{isLoggedIn ? "Workflow oversight is active" : "Previewing board"}</strong>
-          <p>
-            {isLoggedIn
-              ? "Use this page to watch approvals, queues, and ingestion health in one place."
-              : "Guest mode keeps the interface visible while live actions stay disabled."}
-          </p>
+          <strong>{statusHeading}</strong>
+          <p>{statusMessage}</p>
         </div>
       </div>
       <div className="hero-metrics">
@@ -29,6 +32,16 @@ export default function IntroCard({ meta, activityFeed, isLoggedIn }) {
           </article>
         ))}
       </div>
+      {Array.isArray(activityFeed) && activityFeed.length > 0 && (
+        <div className="activity-list" style={{ marginTop: 14 }}>
+          {activityFeed.slice(0, 3).map((item, index) => (
+            <div key={`${item}-${index}`} className="activity-item">
+              <span className="activity-dot" />
+              <p>{item}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -80,6 +80,14 @@ Every request must include the configured request key header:
 X-Request-Key: ef928c10-2da4-4ca6-9b49-dedc912d5b4c
 ```
 
+You can verify the key with:
+
+```bash
+GET /api/auth/verify
+```
+
+`200` means the key is valid. Missing or invalid key returns `403`.
+
 Swagger UI and `/v3/api-docs` are excluded from the request key filter so the documentation page can load normally. The actual business APIs still require the request key, and Swagger UI exposes it through the `Authorize` button.
 
 ## Runtime protection

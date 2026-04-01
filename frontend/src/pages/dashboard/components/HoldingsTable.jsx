@@ -31,8 +31,34 @@ export default function HoldingsTable({
 
   return (
     <>
-      <div className="card-head" style={{ marginBottom: 12 }}>
+      <div
+        className="card-head"
+        style={{
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
         <span>Current Holdings</span>
+        <label htmlFor="holdings-highlight-column" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <span style={{ color: "var(--muted)", fontSize: "0.75rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Highlight
+          </span>
+          <select
+            id="holdings-highlight-column"
+            className="card-select"
+            value={selectedColumn}
+            onChange={(event) => onColumnChange(event.target.value)}
+          >
+            {HOLDING_COLUMN_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div style={{ overflowX: "auto" }}>

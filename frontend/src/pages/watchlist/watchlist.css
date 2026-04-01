@@ -288,6 +288,11 @@
   cursor: pointer;
 }
 
+.watchlist-page .action-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .watchlist-page .action-row .icon-btn {
   margin-left: auto;
   margin-right: 8px;
@@ -298,8 +303,16 @@
   padding: 0;
 }
 
+.watchlist-page .action-row .icon-btn:disabled {
+  color: #cfd4dd;
+}
+
 .watchlist-page .action-row .icon-btn.is-favourite {
   color: #f5b700;
+}
+
+.watchlist-page .action-row .icon-btn.is-favourite:disabled {
+  color: #cfd4dd;
 }
 
 .modal-overlay {

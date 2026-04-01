@@ -80,13 +80,17 @@ export default function MetricsSlider({
           </div>
         </div>
 
-        <CategoryPanel
-          category={activeCategory}
-          sparkPoints={sparkPoints}
-          benchPoints={benchPoints}
-          benchmarkPoints={benchmarkPoints}
-          donutSegments={donutSegments}
-        />
+        <div className="slider-panel-viewport">
+          <div key={activeCategory.id} className="slider-panel-motion">
+            <CategoryPanel
+              category={activeCategory}
+              sparkPoints={sparkPoints}
+              benchPoints={benchPoints}
+              benchmarkPoints={benchmarkPoints}
+              donutSegments={donutSegments}
+            />
+          </div>
+        </div>
 
         <div className="slide-progress">
           <div
