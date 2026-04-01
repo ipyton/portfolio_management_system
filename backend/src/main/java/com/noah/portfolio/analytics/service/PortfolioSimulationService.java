@@ -48,7 +48,11 @@ public class PortfolioSimulationService {
         List<String> symbols = normalizeSymbols(request.symbols(), n);
         List<double[]> simulatedPaths = new ArrayList<>(paths);
         Random random = request.seed() == null ? new Random() : new Random(request.seed());
-        double initialPortfolioValue = portfolioValue(initialPrices, weights);
+        double initialPortfolioValue = weightedPriceValue(initialPrices, weights);
+        if (Math.abs(initialPortfolioValue) <= EPSILON) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Initial portfolio value is near zero; check prices and weights.");
+        }
+        double[] positionUnits = buildPositionUnits(initialPrices, weights, initialPortfolioValue);
 
         for (int path = 0; path < paths; path++) {
             double[] portfolioSeries = new double[steps + 1];
@@ -68,7 +72,7 @@ public class PortfolioSimulationService {
                     prices[i] = prices[i] * Math.exp(drift + diffusion);
                 }
 
-                portfolioSeries[step] = portfolioValue(prices, weights);
+                portfolioSeries[step] = portfolioValue(prices, positionUnits);
             }
 
             simulatedPaths.add(portfolioSeries);
@@ -323,10 +327,26 @@ public class PortfolioSimulationService {
         return out;
     }
 
-    private double portfolioValue(double[] prices, double[] weights) {
+    private double weightedPriceValue(double[] prices, double[] weights) {
         double value = 0.0;
         for (int i = 0; i < prices.length; i++) {
             value += weights[i] * prices[i];
+        }
+        return value;
+    }
+
+    private double[] buildPositionUnits(double[] initialPrices, double[] weights, double initialPortfolioValue) {
+        double[] units = new double[weights.length];
+        for (int i = 0; i < weights.length; i++) {
+            units[i] = (weights[i] * initialPortfolioValue) / initialPrices[i];
+        }
+        return units;
+    }
+
+    private double portfolioValue(double[] prices, double[] positionUnits) {
+        double value = 0.0;
+        for (int i = 0; i < prices.length; i++) {
+            value += positionUnits[i] * prices[i];
         }
         return value;
     }

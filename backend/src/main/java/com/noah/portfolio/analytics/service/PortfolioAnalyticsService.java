@@ -436,7 +436,6 @@ public class PortfolioAnalyticsService {
             double riskFreeRate
     ) {
         List<Map<String, Object>> comparisons = new ArrayList<>();
-        Double portfolioTwr = portfolioReturns.isEmpty() ? null : computeTimeWeightedReturnValue(portfolioReturns);
         for (Map.Entry<String, List<BenchmarkPricePoint>> entry : benchmarkSeries.entrySet()) {
             List<BenchmarkPricePoint> prices = entry.getValue();
             if (prices.size() < 2) {
@@ -448,12 +447,17 @@ public class PortfolioAnalyticsService {
             double totalReturn = growthRatio(first.closePrice(), last.closePrice()) - 1;
             Double annualizedReturn = computeAnnualizedReturn(first.tradeDate(), last.tradeDate(), first.closePrice(), last.closePrice());
             List<ReturnPoint> benchmarkReturns = buildBenchmarkReturnSeries(prices);
-            Double beta = computeBeta(portfolioReturns, benchmarkReturns);
-            Double alpha = annualizedReturn == null || beta == null
+            AlignedReturnSeries alignedReturns = alignReturnSeries(portfolioReturns, benchmarkReturns);
+            Double alignedPortfolioTwr = computeTimeWeightedReturnFromDailyReturns(alignedReturns.portfolioDailyReturns());
+            Double alignedBenchmarkTwr = computeTimeWeightedReturnFromDailyReturns(alignedReturns.benchmarkDailyReturns());
+            Double beta = computeBeta(alignedReturns.portfolioDailyReturns(), alignedReturns.benchmarkDailyReturns());
+            Double alignedPortfolioAnnualized = computeAnnualizedReturnFromDailyReturns(alignedReturns.portfolioDailyReturns());
+            Double alignedBenchmarkAnnualized = computeAnnualizedReturnFromDailyReturns(alignedReturns.benchmarkDailyReturns());
+            Double alpha = alignedPortfolioAnnualized == null || alignedBenchmarkAnnualized == null || beta == null
                     ? null
                     : computeAnnualizedAlpha(
-                            computeAnnualizedReturnFromReturns(portfolioReturns),
-                            annualizedReturn,
+                            alignedPortfolioAnnualized,
+                            alignedBenchmarkAnnualized,
                             riskFreeRate,
                             beta
                     );
@@ -464,10 +468,12 @@ public class PortfolioAnalyticsService {
                     "region", first.region(),
                     "totalReturn", round(totalReturn),
                     "annualizedReturn", annualizedReturn == null ? null : round(annualizedReturn),
-                    "excessReturn", portfolioTwr == null ? null : round(portfolioTwr - totalReturn),
+                    "excessReturn", alignedPortfolioTwr == null || alignedBenchmarkTwr == null
+                            ? null
+                            : round(alignedPortfolioTwr - alignedBenchmarkTwr),
                     "beta", beta == null ? null : round(beta),
                     "alpha", alpha == null ? null : round(alpha),
-                    "observationCount", benchmarkReturns.size()
+                    "observationCount", alignedReturns.observationCount()
             ));
         }
 
@@ -818,6 +824,13 @@ public class PortfolioAnalyticsService {
                 .reduce(1.0, (acc, value) -> acc * (1 + value)) - 1;
     }
 
+    private Double computeTimeWeightedReturnFromDailyReturns(List<Double> dailyReturns) {
+        if (dailyReturns.isEmpty()) {
+            return null;
+        }
+        return dailyReturns.stream().reduce(1.0, (acc, value) -> acc * (1 + value)) - 1;
+    }
+
     private Double computeAnnualizedVolatility(List<ReturnPoint> returnPoints) {
         if (returnPoints.size() < 2) {
             return null;
@@ -843,12 +856,11 @@ public class PortfolioAnalyticsService {
         return maxDrawdown;
     }
 
-    private Double computeBeta(List<ReturnPoint> portfolioReturns, List<ReturnPoint> benchmarkReturns) {
+    private AlignedReturnSeries alignReturnSeries(List<ReturnPoint> portfolioReturns, List<ReturnPoint> benchmarkReturns) {
         Map<LocalDate, Double> portfolioByDate = portfolioReturns.stream()
                 .collect(Collectors.toMap(ReturnPoint::date, ReturnPoint::dailyReturn, (left, right) -> right));
         List<Double> alignedPortfolio = new ArrayList<>();
         List<Double> alignedBenchmark = new ArrayList<>();
-
         for (ReturnPoint benchmarkReturn : benchmarkReturns) {
             Double portfolioReturn = portfolioByDate.get(benchmarkReturn.date());
             if (portfolioReturn != null) {
@@ -856,8 +868,11 @@ public class PortfolioAnalyticsService {
                 alignedBenchmark.add(benchmarkReturn.dailyReturn());
             }
         }
+        return new AlignedReturnSeries(alignedPortfolio, alignedBenchmark);
+    }
 
-        if (alignedPortfolio.size() < 2) {
+    private Double computeBeta(List<Double> alignedPortfolio, List<Double> alignedBenchmark) {
+        if (alignedPortfolio.size() < 2 || alignedPortfolio.size() != alignedBenchmark.size()) {
             return null;
         }
 
@@ -884,8 +899,18 @@ public class PortfolioAnalyticsService {
         if (returnPoints.isEmpty()) {
             return null;
         }
-        double twr = computeTimeWeightedReturnValue(returnPoints);
-        int count = returnPoints.size();
+        return computeAnnualizedReturnFromDailyReturns(returnPoints.stream().map(ReturnPoint::dailyReturn).toList());
+    }
+
+    private Double computeAnnualizedReturnFromDailyReturns(List<Double> dailyReturns) {
+        if (dailyReturns.isEmpty()) {
+            return null;
+        }
+        Double twr = computeTimeWeightedReturnFromDailyReturns(dailyReturns);
+        if (twr == null || 1 + twr <= EPSILON) {
+            return null;
+        }
+        int count = dailyReturns.size();
         return Math.pow(1 + twr, TRADING_DAYS_PER_YEAR / count) - 1;
     }
 
@@ -1191,5 +1216,14 @@ public class PortfolioAnalyticsService {
     }
 
     private record ReturnPoint(LocalDate date, double dailyReturn) {
+    }
+
+    private record AlignedReturnSeries(
+            List<Double> portfolioDailyReturns,
+            List<Double> benchmarkDailyReturns
+    ) {
+        private int observationCount() {
+            return Math.min(portfolioDailyReturns.size(), benchmarkDailyReturns.size());
+        }
     }
 }

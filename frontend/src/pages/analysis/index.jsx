@@ -858,23 +858,6 @@ export default function AnalysisPage({ meta }) {
           </div>
         </div>
 
-        <div className="hero-metrics">
-          <article className="hero-metric">
-            <span>Profile</span>
-            <strong>{profile ? PROFILE_PRESETS[profile].label : "Optional"}</strong>
-            <p>For quick suggestions</p>
-          </article>
-          <article className="hero-metric">
-            <span>Basket Size</span>
-            <strong>{basket.length}</strong>
-            <p>Selected assets</p>
-          </article>
-          <article className="hero-metric">
-            <span>Backtest Window</span>
-            <strong>{windowDays} days</strong>
-            <p>History range</p>
-          </article>
-        </div>
       </section>
 
       <section className="watchlist-shell watchlist-component analysis-shell">
