@@ -5,34 +5,53 @@ const langflowScriptSrc =
   "https://cdn.jsdelivr.net/gh/logspace-ai/langflow-embedded-chat@v1.0.7/dist/build/static/js/bundle.min.js";
 const flowId = import.meta.env.VITE_LANGFLOW_FLOW_ID || "";
 const hostUrl = import.meta.env.VITE_LANGFLOW_HOST_URL || "";
-const windowTitle =
-  import.meta.env.VITE_LANGFLOW_WINDOW_TITLE || "Portfolio Assistant";
+const windowTitle = import.meta.env.VITE_LANGFLOW_WINDOW_TITLE || "Portfolio Assistant";
 
 export default function LangflowWidget() {
   const [isScriptReady, setIsScriptReady] = useState(false);
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
+    let isCancelled = false;
+
+    const markReadyWhenDefined = async () => {
+      try {
+        await customElements.whenDefined("langflow-chat");
+        if (!isCancelled) {
+          setIsScriptReady(true);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setLoadError("Langflow widget failed to initialize.");
+        }
+      }
+    };
+
     const existingScript = document.querySelector(
       `script[data-langflow-script="${langflowScriptSrc}"]`,
     );
 
     if (existingScript) {
-      setIsScriptReady(true);
-      return undefined;
+      markReadyWhenDefined();
+      return () => {
+        isCancelled = true;
+      };
     }
 
     const script = document.createElement("script");
     script.src = langflowScriptSrc;
     script.async = true;
     script.dataset.langflowScript = langflowScriptSrc;
-    script.onload = () => setIsScriptReady(true);
+    script.onload = () => {
+      markReadyWhenDefined();
+    };
     script.onerror = () => {
       setLoadError("Langflow script failed to load.");
     };
 
     document.body.appendChild(script);
     return () => {
+      isCancelled = true;
       script.onload = null;
       script.onerror = null;
     };
@@ -63,6 +82,17 @@ export default function LangflowWidget() {
             flow_id: flowId,
             host_url: hostUrl,
             window_title: windowTitle,
+            chat_position: "top-left",
+            style: {
+              position: "fixed",
+              top: "auto",
+              left: "auto",
+              right: "max(12px, env(safe-area-inset-right))",
+              bottom: "max(12px, env(safe-area-inset-bottom))",
+              zIndex: 70,
+              maxWidth: "calc(100vw - 20px)",
+              maxHeight: "calc(100vh - 20px)",
+            },
           })
         : (
           <aside className="langflow-fallback" aria-live="polite">

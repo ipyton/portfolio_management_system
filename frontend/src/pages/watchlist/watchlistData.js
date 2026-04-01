@@ -1,0 +1,263 @@
+const DAYS_IN_YEAR = 365;
+const YEAR_SPAN = 3;
+
+const formatDate = (date) => date.toISOString().slice(0, 10);
+
+const generateSeries = (seed, startPrice) => {
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() - YEAR_SPAN);
+
+  let price = startPrice;
+  let value = seed;
+  const data = [];
+
+  for (let i = 0; i <= DAYS_IN_YEAR * YEAR_SPAN; i += 1) {
+    value = (value * 1664525 + 1013904223) % 4294967296;
+    const change = (value / 4294967296 - 0.5) * 2;
+    price = Math.max(10, price + change * (startPrice * 0.015));
+    const pointDate = new Date(startDate);
+    pointDate.setDate(startDate.getDate() + i);
+    data.push({
+      date: formatDate(pointDate),
+      price: Number(price.toFixed(2)),
+    });
+  }
+
+  return data;
+};
+
+const seedFromSymbol = (symbol) =>
+  symbol.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+export const watchlistRows = [
+  {
+    symbol: "APPL",
+    type: "Stock",
+    isHolding: true,
+    isFavourite: true,
+    popularity: 92,
+    salesVolume: 780,
+    horizonMonths: 1,
+    holdingShares: 120,
+    returnPct: "3.5%",
+    returns: {
+      "7 Days": "0.8%",
+      "1 Month": "3.5%",
+      "6 Months": "9.1%",
+      "1 Year": "14.4%",
+      "3 Years": "36.2%",
+    },
+    cadence: "Trade Everyday",
+    sharpe: "1%",
+    horizon: "Everyday",
+    drawdown: "10%",
+    priceHistory: generateSeries(seedFromSymbol("APPL"), 188),
+  },
+  {
+    symbol: "MSFT",
+    type: "Stock",
+    isHolding: true,
+    isFavourite: false,
+    popularity: 88,
+    salesVolume: 640,
+    horizonMonths: 3,
+    holdingShares: 85,
+    returnPct: "2.1%",
+    returns: {
+      "7 Days": "0.4%",
+      "1 Month": "2.1%",
+      "6 Months": "7.8%",
+      "1 Year": "12.3%",
+      "3 Years": "29.5%",
+    },
+    cadence: "Trade Weekly",
+    sharpe: "0.8%",
+    horizon: "Weekly",
+    drawdown: "8%",
+    priceHistory: generateSeries(seedFromSymbol("MSFT"), 320),
+  },
+  {
+    symbol: "NVDA",
+    type: "Stock",
+    isHolding: false,
+    isFavourite: true,
+    popularity: 95,
+    salesVolume: 920,
+    horizonMonths: 6,
+    holdingShares: 0,
+    returnPct: "4.4%",
+    returns: {
+      "7 Days": "1.2%",
+      "1 Month": "4.4%",
+      "6 Months": "16.5%",
+      "1 Year": "24.7%",
+      "3 Years": "58.1%",
+    },
+    cadence: "Trade Weekly",
+    sharpe: "1.3%",
+    horizon: "Weekly",
+    drawdown: "12%",
+    priceHistory: generateSeries(seedFromSymbol("NVDA"), 460),
+  },
+  {
+    symbol: "JPM",
+    type: "Stock",
+    isHolding: false,
+    isFavourite: false,
+    popularity: 70,
+    salesVolume: 410,
+    horizonMonths: 12,
+    holdingShares: 0,
+    returnPct: "1.6%",
+    returns: {
+      "7 Days": "0.2%",
+      "1 Month": "1.6%",
+      "6 Months": "5.2%",
+      "1 Year": "9.1%",
+      "3 Years": "21.0%",
+    },
+    cadence: "Trade Monthly",
+    sharpe: "0.7%",
+    horizon: "Monthly",
+    drawdown: "6%",
+    priceHistory: generateSeries(seedFromSymbol("JPM"), 160),
+  },
+  {
+    symbol: "TLT",
+    type: "Bond",
+    isHolding: true,
+    isFavourite: false,
+    popularity: 65,
+    salesVolume: 280,
+    horizonMonths: 12,
+    holdingCash: 18000,
+    returnPct: "0.9%",
+    returns: {
+      "7 Days": "0.1%",
+      "1 Month": "0.9%",
+      "6 Months": "2.4%",
+      "1 Year": "4.2%",
+      "3 Years": "8.5%",
+    },
+    cadence: "Trade Monthly",
+    sharpe: "0.4%",
+    horizon: "Monthly",
+    drawdown: "5%",
+    priceHistory: generateSeries(seedFromSymbol("TLT"), 95),
+  },
+  {
+    symbol: "IEF",
+    type: "Bond",
+    isHolding: false,
+    isFavourite: true,
+    popularity: 60,
+    salesVolume: 240,
+    horizonMonths: 36,
+    holdingCash: 0,
+    returnPct: "0.6%",
+    returns: {
+      "7 Days": "0.1%",
+      "1 Month": "0.6%",
+      "6 Months": "1.9%",
+      "1 Year": "3.3%",
+      "3 Years": "7.2%",
+    },
+    cadence: "Trade Monthly",
+    sharpe: "0.3%",
+    horizon: "Monthly",
+    drawdown: "3%",
+    priceHistory: generateSeries(seedFromSymbol("IEF"), 102),
+  },
+  {
+    symbol: "LQD",
+    type: "Bond",
+    isHolding: true,
+    isFavourite: true,
+    popularity: 72,
+    salesVolume: 310,
+    horizonMonths: 12,
+    holdingCash: 12500,
+    returnPct: "0.8%",
+    returns: {
+      "7 Days": "0.1%",
+      "1 Month": "0.8%",
+      "6 Months": "2.2%",
+      "1 Year": "3.9%",
+      "3 Years": "8.1%",
+    },
+    cadence: "Trade Monthly",
+    sharpe: "0.5%",
+    horizon: "Monthly",
+    drawdown: "4%",
+    priceHistory: generateSeries(seedFromSymbol("LQD"), 108),
+  },
+  {
+    symbol: "BND",
+    type: "Bond",
+    isHolding: false,
+    isFavourite: false,
+    popularity: 58,
+    salesVolume: 260,
+    horizonMonths: 36,
+    holdingCash: 0,
+    returnPct: "0.7%",
+    returns: {
+      "7 Days": "0.1%",
+      "1 Month": "0.7%",
+      "6 Months": "1.8%",
+      "1 Year": "3.1%",
+      "3 Years": "6.8%",
+    },
+    cadence: "Trade Monthly",
+    sharpe: "0.4%",
+    horizon: "Monthly",
+    drawdown: "3%",
+    priceHistory: generateSeries(seedFromSymbol("BND"), 72),
+  },
+  {
+    symbol: "SPY",
+    type: "Stock",
+    isHolding: true,
+    isFavourite: false,
+    popularity: 90,
+    salesVolume: 860,
+    horizonMonths: 6,
+    holdingShares: 40,
+    returnPct: "1.9%",
+    returns: {
+      "7 Days": "0.5%",
+      "1 Month": "1.9%",
+      "6 Months": "6.8%",
+      "1 Year": "11.6%",
+      "3 Years": "26.9%",
+    },
+    cadence: "Trade Weekly",
+    sharpe: "0.9%",
+    horizon: "Weekly",
+    drawdown: "7%",
+    priceHistory: generateSeries(seedFromSymbol("SPY"), 430),
+  },
+  {
+    symbol: "QQQ",
+    type: "Stock",
+    isHolding: false,
+    isFavourite: true,
+    popularity: 87,
+    salesVolume: 740,
+    horizonMonths: 6,
+    holdingShares: 0,
+    returnPct: "2.7%",
+    returns: {
+      "7 Days": "0.7%",
+      "1 Month": "2.7%",
+      "6 Months": "9.4%",
+      "1 Year": "15.2%",
+      "3 Years": "34.7%",
+    },
+    cadence: "Trade Weekly",
+    sharpe: "1.1%",
+    horizon: "Weekly",
+    drawdown: "9%",
+    priceHistory: generateSeries(seedFromSymbol("QQQ"), 380),
+  },
+];

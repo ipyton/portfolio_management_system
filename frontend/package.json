@@ -1,19 +1,30 @@
 {
-
   "name": "portfolio-management-frontend",
   "private": true,
   "version": "0.1.0",
   "packageManager": "npm@10.9.2",
   "type": "module",
+
   "scripts": {
     "dev": "vite --mode dev",
     "build": "vite build --mode dev",
     "preview": "vite preview --mode dev"
   },
+
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.9",
+    "@mui/lab": "^7.0.1-beta.19",
+    "@mui/material": "^7.3.9",
+    "@mui/x-data-grid": "^8.15.0",
+    "@mui/x-date-pickers": "^8.15.0",
+    "dayjs": "^1.11.13",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.4"
   },
+
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.2",
     "vite": "^5.4.10"

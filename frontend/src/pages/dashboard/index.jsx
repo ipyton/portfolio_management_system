@@ -1,240 +1,268 @@
-import React, { useEffect, useState } from "react";
-import {
-  DEFAULT_USER_ID,
-  apiFetch,
-  classForDelta,
-  formatCurrency,
-  formatDate,
-  formatSignedPercent,
-} from "../../lib/api";
+import React, { useEffect, useMemo, useState } from "react";
+import HoldingsTable, { HOLDING_COLUMN_OPTIONS } from "./components/HoldingsTable";
+import IntroCard from "./components/IntroCard";
+import MetricsSlider from "./components/MetricsSlider";
+import TradeList from "./components/TradeList";
+import "./dashboard.css";
 
 export const dashboardPageMeta = {
-  eyebrow: "Operations Dashboard",
-  title: "Run the desk from one calm operational view.",
+  eyebrow: "Dashboard",
+  title: "Dashboard",
   description:
-    "Holdings, cash balances, FX, and portfolio totals are loaded from backend APIs.",
-  metrics: [],
+    "This page is to display the general real-time information of the current portfolio.",
+  metrics: [
+    { label: "Total Amount", value: "24", detail: "The total fund amount." },
+    { label: "Current Profit", value: "3", detail: "Profit" },
+    { label: "Ratio", value: "99.2%", detail: "live ratio of the current" },
+  ],
 };
 
-function SummaryCard({ label, value, detail, tone }) {
-  return (
-    <article className="hero-metric">
-      <span>{label}</span>
-      <strong className={tone}>{value}</strong>
-      <p>{detail}</p>
-    </article>
-  );
+export const dashboardActivityFeed = [
+  "Custodian file matched successfully",
+  "Two approvals are waiting on compliance review",
+  "Settlement queue shows one exception in HK",
+];
+
+const CATEGORIES = [
+  {
+    id: "realtime",
+    label: "Realtime",
+    eyebrow: "Live Snapshot",
+    accent: "#38bdf8",
+    pnl: { value: "+$12,480", detail: "Mark-to-market · Today" },
+    metrics: [
+      { key: "holdingMarketValue", label: "Holding Market Value", value: "$1.84M", detail: "Current positions" },
+      { key: "cashBalance", label: "Cash Balance", value: "$312,500", detail: "Available cash" },
+      { key: "availableFunds", label: "Available Funds", value: "$298,000", detail: "Post-settlement" },
+      { key: "cashByCurrency", label: "Cash by Currency", value: "USD / HKD", detail: "Multi-currency" },
+      { key: "holdings", label: "Holdings Count", value: "42", detail: "Active positions" },
+    ],
+  },
+  {
+    id: "performance",
+    label: "Performance",
+    eyebrow: "Returns & Benchmarks",
+    accent: "#4f7bff",
+    metrics: [
+      { key: "totalReturn", label: "Total Return", value: "+18.4%", detail: "Since inception" },
+      { key: "annualizedReturn", label: "Annualized Return", value: "+12.8%", detail: "CAGR" },
+      { key: "timeWeightedReturn", label: "Time-Weighted Return", value: "+11.3%", detail: "TWR adjusted" },
+    ],
+  },
+  {
+    id: "risk",
+    label: "Risk",
+    eyebrow: "Volatility & Ratios",
+    accent: "#f59e0b",
+    metrics: [
+      { key: "annualizedVolatility", label: "Annualized Volatility", value: "14.7%", detail: "1Y rolling" },
+      { key: "maxDrawdown", label: "Max Drawdown", value: "-8.3%", detail: "Peak to trough" },
+      { key: "sharpeRatio", label: "Sharpe Ratio", value: "1.42", detail: "Risk-adjusted" },
+      { key: "beta", label: "Beta", value: "0.87", detail: "vs benchmark" },
+      { key: "alpha", label: "Alpha", value: "3.2%", detail: "Annual excess" },
+      { key: "riskFreeRate", label: "Risk-Free Rate", value: "5.25%", detail: "3M T-bill" },
+    ],
+  },
+  {
+    id: "holdings",
+    label: "Holdings",
+    eyebrow: "Distribution & Concentration",
+    accent: "#7bd88f",
+    metrics: [
+      { key: "assetClassDistribution", label: "Asset Class", value: "62% EQ", detail: "Equity dominant" },
+      { key: "regionDistribution", label: "Region", value: "US 74%", detail: "Geographic breakdown" },
+      { key: "concentrationRisk", label: "Concentration", value: "Medium", detail: "Top 10: 48% of NAV" },
+    ],
+  },
+  {
+    id: "trading",
+    label: "Trading",
+    eyebrow: "Activity & Costs",
+    accent: "#c084fc",
+    metrics: [
+      { key: "turnoverRate", label: "Turnover Rate", value: "34.2%", detail: "Last 12 months" },
+      { key: "transactionAmount", label: "Transaction Amount", value: "$2.4M", detail: "Total traded" },
+      { key: "totalFees", label: "Total Fees", value: "$3,840", detail: "Commission + spread" },
+      { key: "tradeCount", label: "Trade Count", value: "128", detail: "Executed orders" },
+      { key: "buySellRecords", label: "Buy / Sell", value: "74 / 54", detail: "Directional split" },
+    ],
+  },
+];
+
+const LIVE_DASHBOARD_API = import.meta.env.VITE_DASHBOARD_LIVE_API || "/api/dashboard/live";
+const LIVE_POLLING_MS = 15000;
+
+const BENCH_POINTS = [100, 103.2, 101.8, 107.4, 109.1, 106.3, 112.6, 115.4, 113.2, 118.7, 120.1, 118.4];
+const BENCHMARK_POINTS = [100, 101.4, 100.2, 104.6, 105.8, 103.1, 107.4, 109.8, 108.3, 112.1, 114.5, 115.2];
+const SPARK_POINTS = [0, 2140, 4870, 3620, 6310, 5480, 7920, 9250, 8100, 10640, 11380, 10820, 12480];
+const DONUT_SEGMENTS = [
+  { label: "Tech", pct: 31, color: "#4f7bff" },
+  { label: "Finance", pct: 21, color: "#7bd88f" },
+  { label: "Healthcare", pct: 13, color: "#38bdf8" },
+  { label: "Consumer", pct: 10, color: "#f59e0b" },
+  { label: "Energy", pct: 9, color: "#f97316" },
+  { label: "EV", pct: 8, color: "#c084fc" },
+  { label: "Semis", pct: 8, color: "#fb7185" },
+];
+
+function normalizeHoldingRow(row) {
+  return {
+    symbol: String(row?.symbol ?? "").toUpperCase(),
+    companyName: row?.companyName ?? row?.company ?? "",
+    label: row?.label ?? "Other",
+    shares: Number(row?.shares ?? 0),
+    currentPrice: Number(row?.currentPrice ?? row?.price ?? 0),
+    costBasis: Number(row?.costBasis ?? row?.avgCost ?? 0),
+  };
 }
 
-export default function DashboardPage({ meta }) {
-  const [dashboard, setDashboard] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+function normalizeTradeRow(row, index) {
+  return {
+    id: row?.id ?? `live-trade-${index}`,
+    symbol: String(row?.symbol ?? "").toUpperCase(),
+    side: row?.side ?? "N/A",
+    companyName: row?.companyName ?? row?.company ?? "",
+    shares: Number(row?.shares ?? 0),
+    price: Number(row?.price ?? 0),
+    total: Number(row?.total ?? Number(row?.shares ?? 0) * Number(row?.price ?? 0)),
+    date: row?.date ?? "",
+  };
+}
+
+// ---------------------------------------------------
+
+// Dashboard Page.
+export default function DashboardPage({ meta = dashboardPageMeta, activityFeed = dashboardActivityFeed, isLoggedIn }) {
+  // Centralize dashboard state in index.jsx and pass it to presentational components.
+  const [activeCategoryId, setActiveCategoryId] = useState(CATEGORIES[0].id);
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [liveHoldings, setLiveHoldings] = useState([]);
+  const [liveTrades, setLiveTrades] = useState([]);
+  const [isLiveLoading, setIsLiveLoading] = useState(true);
+  const [liveDataUnavailable, setLiveDataUnavailable] = useState(false);
+  const [selectedColumn, setSelectedColumn] = useState(HOLDING_COLUMN_OPTIONS[0].key);
+
+  const activeCategory = useMemo(
+    () => CATEGORIES.find((category) => category.id === activeCategoryId) || CATEGORIES[0],
+    [activeCategoryId],
+  );
+  const activeCategoryIndex = useMemo(
+    () => CATEGORIES.findIndex((category) => category.id === activeCategoryId),
+    [activeCategoryId],
+  );
 
   useEffect(() => {
-    let cancelled = false;
+    let isMounted = true;
 
-    async function load() {
-      setLoading(true);
-      setError("");
-
+    async function fetchLiveDashboardData() {
       try {
-        const [analytics, holdings, cashBalances, fx] = await Promise.all([
-          apiFetch(`/api/portfolio/dashboard?baseCurrency=CNY&userId=${DEFAULT_USER_ID}`),
-          apiFetch(`/api/holdings?userId=${DEFAULT_USER_ID}`),
-          apiFetch(`/api/cash-accounts?userId=${DEFAULT_USER_ID}`),
-          apiFetch("/api/fx/latest?quoteCurrency=CNY"),
-        ]);
+        const response = await fetch(LIVE_DASHBOARD_API);
+        if (!response.ok) {
+          throw new Error(`Live API failed with status ${response.status}`);
+        }
+        const payload = await response.json();
+        const holdings = Array.isArray(payload?.holdings)
+          ? payload.holdings.map(normalizeHoldingRow)
+          : [];
+        const trades = Array.isArray(payload?.trades)
+          ? payload.trades.map(normalizeTradeRow)
+          : [];
 
-        if (!cancelled) {
-          setDashboard({ analytics, holdings, cashBalances, fx });
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError.message);
-        }
+        if (!isMounted) return;
+        setLiveHoldings(holdings);
+        setLiveTrades(trades);
+        setLiveDataUnavailable(false);
+      } catch (error) {
+        if (!isMounted) return;
+        setLiveHoldings([]);
+        setLiveTrades([]);
+        setLiveDataUnavailable(true);
       } finally {
-        if (!cancelled) {
-          setLoading(false);
+        if (isMounted) {
+          setIsLiveLoading(false);
         }
       }
     }
 
-    load();
+    fetchLiveDashboardData();
+    const timer = setInterval(fetchLiveDashboardData, LIVE_POLLING_MS);
+
     return () => {
-      cancelled = true;
+      isMounted = false;
+      clearInterval(timer);
     };
   }, []);
 
-  const analytics = dashboard?.analytics || {};
-  const realtime = analytics.realtime || {};
-  const metaSection = analytics.meta || {};
-  const holdings = dashboard?.holdings?.items || [];
-  const balances = dashboard?.cashBalances?.items || [];
-  const fxRates = dashboard?.fx?.rates || [];
-  const warnings = metaSection.warnings || [];
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const symbolExists = liveHoldings.some((holding) => holding.symbol === selectedSymbol);
+    if (!symbolExists) {
+      setSelectedSymbol(null);
+    }
+  }, [liveHoldings, selectedSymbol]);
+
+  const enrichedHoldings = useMemo(() => {
+    const withMetrics = liveHoldings.map((holding) => {
+      const marketValue = holding.shares * holding.currentPrice;
+      const pnl = marketValue - holding.shares * holding.costBasis;
+      return { ...holding, marketValue, pnl };
+    });
+    const totalMarketValue = withMetrics.reduce((sum, holding) => sum + holding.marketValue, 0);
+    return withMetrics.map((holding) => ({
+      ...holding,
+      allocation: totalMarketValue > 0 ? (holding.marketValue / totalMarketValue) * 100 : 0,
+    }));
+  }, [liveHoldings]);
+
+  function goToPrevCategory() {
+    const nextIndex = activeCategoryIndex <= 0 ? CATEGORIES.length - 1 : activeCategoryIndex - 1;
+    setActiveCategoryId(CATEGORIES[nextIndex].id);
+  }
+
+  function goToNextCategory() {
+    const nextIndex = activeCategoryIndex >= CATEGORIES.length - 1 ? 0 : activeCategoryIndex + 1;
+    setActiveCategoryId(CATEGORIES[nextIndex].id);
+  }
 
   return (
     <>
-      <section className="hero-panel">
-        <p className="eyebrow">{meta.eyebrow}</p>
-        <div className="hero-heading-row">
-          <div>
-            <h1>{meta.title}</h1>
-            <p className="hero-copy">{meta.description}</p>
-          </div>
-          <div className="hero-status-card">
-            <span>Runtime</span>
-            <strong>{error ? "Request failed" : loading ? "Requesting data" : "Data loaded"}</strong>
-            <p>
-              {loading
-                ? "Loading dashboard data."
-                : error
-                  ? error
-                  : `Portfolio snapshot as of ${analytics.asOf || "N/A"}.`}
-            </p>
-          </div>
-        </div>
-
-        <div className="hero-metrics">
-          <SummaryCard
-            label="Holdings Value"
-            value={formatCurrency(realtime.holdingMarketValue, metaSection.reportingCurrency || "CNY")}
-            detail="Current holding market value"
+      <IntroCard meta={meta} activityFeed={activityFeed} isLoggedIn={isLoggedIn} />
+      <MetricsSlider
+        categories={CATEGORIES}
+        activeCategory={activeCategory}
+        activeCategoryIndex={activeCategoryIndex}
+        onPrev={goToPrevCategory}
+        onNext={goToNextCategory}
+        onSelectCategory={setActiveCategoryId}
+        sparkPoints={SPARK_POINTS}
+        benchPoints={BENCH_POINTS}
+        benchmarkPoints={BENCHMARK_POINTS}
+        donutSegments={DONUT_SEGMENTS}
+      />
+      <div className="stock-bottom-grid">
+        <section className="feature-card" style={{ padding: 18 }}>
+          <HoldingsTable
+            holdings={enrichedHoldings}
+            selectedSymbol={selectedSymbol}
+            onSelectSymbol={setSelectedSymbol}
+            selectedColumn={selectedColumn}
+            onColumnChange={setSelectedColumn}
+            isLoading={isLiveLoading}
+            dataUnavailable={liveDataUnavailable}
+            minRows={5}
           />
-          <SummaryCard
-            label="Cash Balance"
-            value={formatCurrency(realtime.cashBalance, metaSection.reportingCurrency || "CNY")}
-            detail="Aggregated across accounts"
+        </section>
+        <section>
+          <TradeList 
+            trades={liveTrades}
+            selectedSymbol={selectedSymbol} 
+            onClear={() => setSelectedSymbol(null)}
+            isLoading={isLiveLoading}
+            dataUnavailable={liveDataUnavailable}
+            minRows={5}
           />
-          <SummaryCard
-            label="Today's P&L"
-            value={formatCurrency(realtime.todayPnl, metaSection.reportingCurrency || "CNY")}
-            detail="Portfolio daily move"
-            tone={classForDelta(realtime.todayPnl)}
-          />
-        </div>
-      </section>
-
-      <section className="content-grid">
-        <article className="feature-card">
-          <div className="card-head">
-            <span>Cash Accounts</span>
-            <strong>{balances.length} wallets</strong>
-          </div>
-          <div className="metric-stack">
-            {balances.map((item) => (
-              <div key={item.cashAccountId} className="metric-stack__row">
-                <div>
-                  <strong>{item.currency}</strong>
-                  <p>Available {formatCurrency(item.availableBalance, item.currency)}</p>
-                </div>
-                <div>
-                  <strong>{formatCurrency(item.balance, item.currency)}</strong>
-                  <p>Frozen {formatCurrency(item.frozenBalance, item.currency)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="feature-card">
-          <div className="card-head">
-            <span>FX Snapshot</span>
-            <strong>{dashboard?.fx?.reportingCurrency || "CNY"}</strong>
-          </div>
-          <div className="pill-list">
-            {fxRates.map((rate) => (
-              <div key={`${rate.baseCurrency}-${rate.quoteCurrency}`} className="pill-list__item">
-                <strong>
-                  {rate.baseCurrency}/{rate.quoteCurrency}
-                </strong>
-                <span>{Number(rate.rate).toFixed(4)}</span>
-                <p>{rate.symbol || rate.source || "N/A"}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="content-grid">
-        <article className="feature-card">
-          <div className="card-head">
-            <span>Positions</span>
-            <strong>{holdings.length} active holdings</strong>
-          </div>
-          <div className="metric-stack">
-            {holdings.slice(0, 5).map((item) => (
-              <div key={item.holdingId} className="metric-stack__row">
-                <div>
-                  <strong>{item.symbol}</strong>
-                  <p>
-                    {Number(item.quantity).toFixed(2)} shares at{" "}
-                    {formatCurrency(item.avgCost, item.currency)}
-                  </p>
-                </div>
-                <div>
-                  <strong>{formatCurrency(item.marketValue, item.currency)}</strong>
-                  <p className={classForDelta(item.dailyChangePercent)}>
-                    {formatSignedPercent(item.dailyChangePercent)}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="feature-card">
-          <div className="card-head">
-            <span>System Notes</span>
-            <strong>{warnings.length ? `${warnings.length} checks` : "Clear"}</strong>
-          </div>
-          {warnings.length ? (
-            <div className="activity-list">
-              {warnings.map((item) => (
-                <div key={item} className="activity-item">
-                  <span className="activity-dot" />
-                  <p>{item}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="card-subtitle">No runtime notices were returned for this snapshot.</p>
-          )}
-        </article>
-      </section>
-
-      <article className="feature-card table-card">
-        <div className="card-head">
-          <span>Holdings Table</span>
-          <strong>{analytics.asOf || "N/A"}</strong>
-        </div>
-        <p className="card-subtitle">
-          Directly wired to `/api/holdings` with live market values and daily changes.
-        </p>
-        <div className="data-table">
-          <div className="data-table__header">
-            <span>Symbol</span>
-            <span>Name</span>
-            <span>Qty</span>
-            <span>Price</span>
-            <span>P&L</span>
-            <span>Updated</span>
-          </div>
-          {holdings.map((item) => (
-            <div key={item.holdingId} className="data-table__row">
-              <span>{item.symbol}</span>
-              <span>{item.name}</span>
-              <span>{Number(item.quantity).toFixed(2)}</span>
-              <span>{formatCurrency(item.latestClose, item.currency)}</span>
-              <span className={classForDelta(item.unrealizedPnl)}>
-                {formatCurrency(item.unrealizedPnl, item.currency)}
-              </span>
-              <span>{formatDate(item.latestTradeDate)}</span>
-            </div>
-          ))}
-        </div>
-      </article>
+        </section>
+      </div>
     </>
   );
 }
