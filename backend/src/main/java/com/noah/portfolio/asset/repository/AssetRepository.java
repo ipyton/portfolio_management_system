@@ -17,6 +17,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
 
+    Optional<AssetEntity> findFirstBySymbolIgnoreCaseOrderByIdAsc(String symbol);
+
     Optional<AssetEntity> findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(String symbol, AssetType assetType);
 
     @Query("select coalesce(max(a.id), 0) from AssetEntity a")

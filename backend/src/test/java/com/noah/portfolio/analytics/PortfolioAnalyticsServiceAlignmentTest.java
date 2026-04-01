@@ -20,8 +20,10 @@ import com.noah.portfolio.analytics.entity.PortfolioNavDailyEntity;
 import com.noah.portfolio.analytics.repository.PortfolioNavDailyRepository;
 import com.noah.portfolio.analytics.repository.SystemConfigRepository;
 import com.noah.portfolio.analytics.service.PortfolioAnalyticsService;
+import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.fx.service.FxRateService;
+import com.noah.portfolio.scheduler.service.PortfolioNavSnapshotService;
 import com.noah.portfolio.trading.repository.CashAccountRepository;
 import com.noah.portfolio.trading.repository.HoldingRepository;
 import com.noah.portfolio.trading.repository.TradeHistoryRepository;
@@ -39,6 +41,8 @@ class PortfolioAnalyticsServiceAlignmentTest {
         AssetPriceDailyRepository assetPriceDailyRepository = mock(AssetPriceDailyRepository.class);
         SystemConfigRepository systemConfigRepository = mock(SystemConfigRepository.class);
         FxRateService fxRateService = mock(FxRateService.class);
+        FinnhubClient finnhubClient = mock(FinnhubClient.class);
+        PortfolioNavSnapshotService portfolioNavSnapshotService = mock(PortfolioNavSnapshotService.class);
 
         List<PortfolioNavDailyEntity> navSeries = List.of(
                 nav(LocalDate.of(2026, 1, 1), 100.0, null),
@@ -75,7 +79,9 @@ class PortfolioAnalyticsServiceAlignmentTest {
                 tradeHistoryRepository,
                 assetPriceDailyRepository,
                 systemConfigRepository,
-                fxRateService
+                fxRateService,
+                finnhubClient,
+                portfolioNavSnapshotService
         );
 
         Map<String, Object> response = service.getDashboardSummary(1L, "SPX", "USD");

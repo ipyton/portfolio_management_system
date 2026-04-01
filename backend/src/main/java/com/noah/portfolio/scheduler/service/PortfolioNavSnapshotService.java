@@ -80,6 +80,22 @@ public class PortfolioNavSnapshotService {
         log.info("Portfolio NAV snapshots refreshed. navDate={}, reportingCurrency={}, userCount={}", navDate, reportingCurrency, updated);
     }
 
+    @Transactional
+    public void buildSnapshotForUser(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        Optional<UserEntity> user = userRepository.findById(userId);
+        if (user.isEmpty()) {
+            return;
+        }
+
+        ZoneId zoneId = ZoneId.of(schedulerProperties.getZone());
+        LocalDate navDate = LocalDate.now(zoneId);
+        String reportingCurrency = fxRateService.reportingCurrency();
+        upsertSnapshotForUser(user.get(), navDate, zoneId, reportingCurrency);
+    }
+
     private void upsertSnapshotForUser(UserEntity user, LocalDate navDate, ZoneId zoneId, String reportingCurrency) {
         List<HoldingEntity> holdings = holdingRepository.findActiveHoldingsWithAssetDetailsByUserId(user.getId());
         Map<Long, AssetPriceDailyRepository.AssetLatestPriceView> latestPricesByAssetId = holdings.isEmpty()

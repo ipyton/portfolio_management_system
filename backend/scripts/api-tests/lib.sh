@@ -6,11 +6,9 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 REQUEST_KEY_HEADER="${REQUEST_KEY_HEADER:-X-Request-Key}"
 REQUEST_KEY="${REQUEST_KEY:-ef928c10-2da4-4ca6-9b49-dedc912d5b4c}"
 
-TEST_USER_ID="${TEST_USER_ID:-900001}"
-TEST_ASSET_ID="${TEST_ASSET_ID:-900101}"
-TEST_SYMBOL="${TEST_SYMBOL:-AAPLTST}"
-
-export BASE_URL REQUEST_KEY_HEADER REQUEST_KEY TEST_USER_ID TEST_ASSET_ID TEST_SYMBOL
+TEST_USER_ID="${TEST_USER_ID:-}"
+TEST_ASSET_ID="${TEST_ASSET_ID:-}"
+TEST_SYMBOL="${TEST_SYMBOL:-}"
 
 API_TEST_TMP_DIR="${API_TEST_TMP_DIR:-$(mktemp -d)}"
 API_TEST_CREATED_TMP_DIR="${API_TEST_CREATED_TMP_DIR:-1}"
@@ -36,6 +34,21 @@ require_command() {
 
 require_command curl
 require_command jq
+
+require_env() {
+    local key="$1"
+    local value="${!key:-}"
+    if [[ -z "${value}" ]]; then
+        echo "Missing required environment variable: ${key}" >&2
+        exit 1
+    fi
+}
+
+require_env TEST_USER_ID
+require_env TEST_ASSET_ID
+require_env TEST_SYMBOL
+
+export BASE_URL REQUEST_KEY_HEADER REQUEST_KEY TEST_USER_ID TEST_ASSET_ID TEST_SYMBOL
 
 log_step() {
     printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$1"

@@ -36,6 +36,7 @@ public class FinnhubClient {
     private static final String PROFILE_PATH = "/api/v1/stock/profile2";
     private static final String METRIC_PATH = "/api/v1/stock/metric";
     private static final String CANDLE_PATH = "/api/v1/stock/candle";
+    private static final String GENERAL_NEWS_PATH = "/api/v1/news";
     private static final String METRIC_ALL = "all";
 
     private final RestClient restClient;
@@ -212,6 +213,51 @@ public class FinnhubClient {
         }
     }
 
+    public List<NewsHeadline> fetchGeneralNews(String category, int limit) {
+        if (!isAvailable()) {
+            return List.of();
+        }
+
+        String normalizedCategory = StringUtils.hasText(category)
+                ? category.trim().toLowerCase(Locale.ROOT)
+                : "general";
+        int normalizedLimit = Math.max(1, Math.min(limit, 50));
+
+        try {
+            JsonNode root = getJson(uriBuilder -> uriBuilder
+                    .path(GENERAL_NEWS_PATH)
+                    .queryParam("category", normalizedCategory)
+                    .queryParam("token", properties.getApiKey())
+                    .build());
+            if (!root.isArray()) {
+                return List.of();
+            }
+
+            List<NewsHeadline> headlines = new java.util.ArrayList<>(normalizedLimit);
+            Iterator<JsonNode> iterator = root.elements();
+            while (iterator.hasNext() && headlines.size() < normalizedLimit) {
+                JsonNode item = iterator.next();
+                String headline = text(item, "headline");
+                String url = text(item, "url");
+                if (!StringUtils.hasText(headline) || !StringUtils.hasText(url)) {
+                    continue;
+                }
+
+                long epochSeconds = item.path("datetime").asLong(0L);
+                Instant publishedAt = epochSeconds > 0L ? Instant.ofEpochSecond(epochSeconds) : null;
+                headlines.add(new NewsHeadline(
+                        text(item, "source"),
+                        headline,
+                        url,
+                        publishedAt
+                ));
+            }
+            return headlines;
+        } catch (IOException | RestClientException ex) {
+            throw new FinnhubLookupException("Failed to fetch Finnhub general news.", ex);
+        }
+    }
+
     private boolean isAvailable() {
         return properties.isEnabled() && StringUtils.hasText(properties.getApiKey());
     }
@@ -319,5 +365,13 @@ public class FinnhubClient {
         public FinnhubLookupException(String message, Throwable cause) {
             super(message, cause);
         }
+    }
+
+    public record NewsHeadline(
+            String source,
+            String headline,
+            String url,
+            Instant publishedAt
+    ) {
     }
 }

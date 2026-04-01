@@ -6,6 +6,7 @@ import com.noah.portfolio.analytics.repository.*;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -18,14 +19,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.fx.service.FxRateService;
+import com.noah.portfolio.scheduler.service.PortfolioNavSnapshotService;
 import com.noah.portfolio.trading.entity.HoldingEntity;
 import com.noah.portfolio.trading.repository.HoldingRepository;
 import com.noah.portfolio.trading.repository.CashAccountRepository;
@@ -40,6 +44,9 @@ public class PortfolioAnalyticsService {
     private static final double TRADING_DAYS_PER_YEAR = 252.0;
     private static final double EPSILON = 1e-9;
     private static final int SCALE = 6;
+    private static final int DASHBOARD_NEWS_LIMIT = 3;
+    private static final Duration NEWS_CACHE_TTL = Duration.ofMinutes(2);
+    private static final Duration NAV_REBUILD_TTL = Duration.ofSeconds(30);
 
     private final UserRepository userRepository;
     private final PortfolioNavDailyRepository portfolioNavDailyRepository;
@@ -49,6 +56,11 @@ public class PortfolioAnalyticsService {
     private final AssetPriceDailyRepository assetPriceDailyRepository;
     private final SystemConfigRepository systemConfigRepository;
     private final FxRateService fxRateService;
+    private final FinnhubClient finnhubClient;
+    private final PortfolioNavSnapshotService portfolioNavSnapshotService;
+    private volatile Instant cachedNewsAt;
+    private volatile List<Map<String, Object>> cachedNews = List.of();
+    private final Map<Long, Instant> navRebuildAtByUser = new ConcurrentHashMap<>();
 
     public PortfolioAnalyticsService(
             UserRepository userRepository,
@@ -58,7 +70,9 @@ public class PortfolioAnalyticsService {
             TradeHistoryRepository tradeHistoryRepository,
             AssetPriceDailyRepository assetPriceDailyRepository,
             SystemConfigRepository systemConfigRepository,
-            FxRateService fxRateService
+            FxRateService fxRateService,
+            FinnhubClient finnhubClient,
+            PortfolioNavSnapshotService portfolioNavSnapshotService
     ) {
         this.userRepository = userRepository;
         this.portfolioNavDailyRepository = portfolioNavDailyRepository;
@@ -68,6 +82,8 @@ public class PortfolioAnalyticsService {
         this.assetPriceDailyRepository = assetPriceDailyRepository;
         this.systemConfigRepository = systemConfigRepository;
         this.fxRateService = fxRateService;
+        this.finnhubClient = finnhubClient;
+        this.portfolioNavSnapshotService = portfolioNavSnapshotService;
     }
 
     public Map<String, Object> getDashboardSummary(Long requestedUserId, String requestedBenchmarkSymbol, String requestedBaseCurrency) {
@@ -76,10 +92,13 @@ public class PortfolioAnalyticsService {
             return emptyResponse("No user data found.");
         }
 
+        maybeAutoRebuildTodaySnapshot(userId);
+
         List<NavPoint> navPoints = fetchNavPoints(userId);
         List<HoldingSnapshot> holdings = fetchHoldings(userId);
         List<CashBalance> cashBalances = fetchCashBalances(userId);
         List<TradeRecord> trades = fetchTrades(userId);
+        boolean hasLiveData = !holdings.isEmpty() || !cashBalances.isEmpty() || !trades.isEmpty();
         String reportingCurrency = resolveReportingCurrency(requestedBaseCurrency);
 
         LocalDate startDate = navPoints.isEmpty() ? null : navPoints.get(0).navDate();
@@ -104,9 +123,9 @@ public class PortfolioAnalyticsService {
                 .findFirst()
                 .orElse(benchmarkComparisons.isEmpty() ? null : benchmarkComparisons.get(0));
 
-        double totalCash = resolveCashTotal(navPoints, cashBalances, reportingCurrency);
+        double totalCash = resolveCashTotal(cashBalances, reportingCurrency);
         double totalAvailableFunds = resolveAvailableFunds(cashBalances, reportingCurrency);
-        double totalHoldingMarketValue = resolveHoldingMarketValue(navPoints, holdings, reportingCurrency);
+        double totalHoldingMarketValue = resolveHoldingMarketValue(holdings, reportingCurrency);
         double totalPortfolioValue = totalHoldingMarketValue + totalCash;
         LocalDate asOfDate = resolveAsOfDate(navPoints, holdings);
 
@@ -114,10 +133,11 @@ public class PortfolioAnalyticsService {
         response.put("userId", userId);
         response.put("hasData", !navPoints.isEmpty() || !holdings.isEmpty() || !cashBalances.isEmpty() || !trades.isEmpty());
         response.put("asOf", asOfDate != null ? asOfDate.toString() : LocalDate.now().toString());
-        response.put("performance", buildPerformanceSection(navPoints, portfolioReturns, benchmarkComparisons));
+        response.put("performance", buildPerformanceSection(navPoints, portfolioReturns, benchmarkComparisons, hasLiveData));
         response.put("risk", buildRiskSection(navPoints, portfolioReturns, primaryBenchmarkMetrics, riskFreeRate));
         response.put("holdings", buildHoldingsSection(holdings, cashBalances, totalHoldingMarketValue, totalPortfolioValue, reportingCurrency));
         response.put("trading", buildTradingSection(trades, navPoints, totalPortfolioValue, reportingCurrency));
+        response.put("news", resolveDashboardNews(primaryBenchmarkSymbol, dominantRegion));
         response.put("realtime", buildRealtimeSection(
                 navPoints,
                 holdings,
@@ -127,7 +147,8 @@ public class PortfolioAnalyticsService {
                 totalAvailableFunds,
                 totalPortfolioValue,
                 asOfDate,
-                reportingCurrency
+                reportingCurrency,
+                hasLiveData
         ));
         response.put("meta", buildMetaSection(
                 navPoints,
@@ -142,12 +163,84 @@ public class PortfolioAnalyticsService {
         return response;
     }
 
+    private void maybeAutoRebuildTodaySnapshot(Long userId) {
+        Instant lastRebuildAt = navRebuildAtByUser.get(userId);
+        Instant now = Instant.now();
+        if (lastRebuildAt != null && Duration.between(lastRebuildAt, now).compareTo(NAV_REBUILD_TTL) < 0) {
+            return;
+        }
+        portfolioNavSnapshotService.buildSnapshotForUser(userId);
+        navRebuildAtByUser.put(userId, now);
+    }
+
+    private List<Map<String, Object>> resolveDashboardNews(String benchmarkSymbol, String dominantRegion) {
+        List<Map<String, Object>> cachedSnapshot = cachedNews;
+        Instant fetchedAt = cachedNewsAt;
+        Instant now = Instant.now();
+
+        if (fetchedAt != null
+                && Duration.between(fetchedAt, now).compareTo(NEWS_CACHE_TTL) < 0
+                && !cachedSnapshot.isEmpty()) {
+            return cachedSnapshot;
+        }
+
+        List<Map<String, Object>> freshNews = fetchDashboardNews(benchmarkSymbol, dominantRegion);
+        if (!freshNews.isEmpty()) {
+            cachedNews = freshNews;
+            cachedNewsAt = now;
+            return freshNews;
+        }
+        return cachedSnapshot;
+    }
+
+    private List<Map<String, Object>> fetchDashboardNews(String benchmarkSymbol, String dominantRegion) {
+        String category = resolveNewsCategory(dominantRegion);
+        List<FinnhubClient.NewsHeadline> newsItems;
+        try {
+            newsItems = finnhubClient.fetchGeneralNews(category, DASHBOARD_NEWS_LIMIT * 2);
+        } catch (FinnhubClient.FinnhubLookupException ex) {
+            return List.of();
+        }
+        if (newsItems == null || newsItems.isEmpty()) {
+            return List.of();
+        }
+
+        return newsItems.stream()
+                .filter(item -> StringUtils.hasText(item.headline()))
+                .filter(item -> StringUtils.hasText(item.url()))
+                .limit(DASHBOARD_NEWS_LIMIT)
+                .map(item -> orderedMap(
+                        "headline", item.headline(),
+                        "source", item.source(),
+                        "url", item.url(),
+                        "publishedAt", item.publishedAt() == null ? null : item.publishedAt().toString(),
+                        "category", category,
+                        "benchmarkSymbol", benchmarkSymbol
+                ))
+                .toList();
+    }
+
+    private String resolveNewsCategory(String dominantRegion) {
+        if ("CN".equalsIgnoreCase(dominantRegion)) {
+            return "general";
+        }
+        return "general";
+    }
+
     private Map<String, Object> buildPerformanceSection(
             List<NavPoint> navPoints,
             List<ReturnPoint> portfolioReturns,
-            List<Map<String, Object>> benchmarkComparisons
+            List<Map<String, Object>> benchmarkComparisons,
+            boolean hasLiveData
     ) {
         LinkedHashMap<String, Object> performance = new LinkedHashMap<>();
+        if (!hasLiveData) {
+            performance.put("totalReturn", null);
+            performance.put("annualizedReturn", null);
+            performance.put("timeWeightedReturn", null);
+            performance.put("benchmarkComparisons", benchmarkComparisons);
+            return performance;
+        }
         double totalReturn = computeTotalReturn(navPoints);
         Double annualizedReturn = computeAnnualizedReturn(navPoints);
         Double timeWeightedReturn = computeTimeWeightedReturn(portfolioReturns);
@@ -246,10 +339,11 @@ public class PortfolioAnalyticsService {
             double totalAvailableFunds,
             double totalPortfolioValue,
             LocalDate asOfDate,
-            String reportingCurrency
+            String reportingCurrency,
+            boolean hasLiveData
     ) {
         LinkedHashMap<String, Object> realtime = new LinkedHashMap<>();
-        realtime.put("todayPnl", computeTodayPnl(navPoints, totalPortfolioValue, reportingCurrency, asOfDate));
+        realtime.put("todayPnl", computeTodayPnl(navPoints, totalPortfolioValue, reportingCurrency, asOfDate, hasLiveData));
         realtime.put("holdingMarketValue", round(totalHoldingMarketValue));
         realtime.put("cashBalance", round(totalCash));
         realtime.put("availableFunds", round(totalAvailableFunds));
@@ -646,11 +740,11 @@ public class PortfolioAnalyticsService {
                 .orElse(0.0);
     }
 
-    private double resolveCashTotal(List<NavPoint> navPoints, List<CashBalance> cashBalances, String reportingCurrency) {
-        if (!cashBalances.isEmpty()) {
-            return sum(cashBalances.stream().map(balance -> cashBalanceValue(balance, reportingCurrency)).toList());
+    private double resolveCashTotal(List<CashBalance> cashBalances, String reportingCurrency) {
+        if (cashBalances.isEmpty()) {
+            return 0.0;
         }
-        return navPoints.isEmpty() ? 0.0 : nullableToZero(navCashValue(navPoints.get(navPoints.size() - 1), reportingCurrency));
+        return sum(cashBalances.stream().map(balance -> cashBalanceValue(balance, reportingCurrency)).toList());
     }
 
     private double resolveAvailableFunds(List<CashBalance> cashBalances, String reportingCurrency) {
@@ -660,11 +754,11 @@ public class PortfolioAnalyticsService {
         return sum(cashBalances.stream().map(balance -> cashAvailableValue(balance, reportingCurrency)).toList());
     }
 
-    private double resolveHoldingMarketValue(List<NavPoint> navPoints, List<HoldingSnapshot> holdings, String reportingCurrency) {
-        if (!holdings.isEmpty()) {
-            return sum(holdings.stream().map(holding -> holdingMarketValue(holding, reportingCurrency)).toList());
+    private double resolveHoldingMarketValue(List<HoldingSnapshot> holdings, String reportingCurrency) {
+        if (holdings.isEmpty()) {
+            return 0.0;
         }
-        return navPoints.isEmpty() ? 0.0 : nullableToZero(navHoldingValue(navPoints.get(navPoints.size() - 1), reportingCurrency));
+        return sum(holdings.stream().map(holding -> holdingMarketValue(holding, reportingCurrency)).toList());
     }
 
     private String resolveReportingCurrency(String requestedBaseCurrency) {
@@ -918,8 +1012,12 @@ public class PortfolioAnalyticsService {
             List<NavPoint> navPoints,
             double currentPortfolioValue,
             String reportingCurrency,
-            LocalDate asOfDate
+            LocalDate asOfDate,
+            boolean hasLiveData
     ) {
+        if (!hasLiveData) {
+            return null;
+        }
         if (navPoints.isEmpty()) {
             return null;
         }
@@ -1037,6 +1135,7 @@ public class PortfolioAnalyticsService {
                 "tradeCount", 0,
                 "buySellRecords", List.of()
         ));
+        response.put("news", List.of());
         response.put("realtime", orderedMap(
                 "todayPnl", null,
                 "holdingMarketValue", 0,

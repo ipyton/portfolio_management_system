@@ -69,7 +69,7 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
 
 The `local` profile provides:
 
-- in-memory H2 database seeded with demo portfolio data
+- in-memory H2 database with schema only (no seed data)
 - disabled schedulers and rate limiting
 - Yahoo Finance disabled so asset search stays deterministic
 - H2 console at `http://localhost:8080/h2-console`
@@ -180,27 +180,28 @@ The repository includes reusable API test scripts under `backend/scripts/api-tes
 
 Included files:
 
-- `backend/scripts/api-tests/seed_test_data.sql`: inserts a deterministic user and stock asset for API testing
-- `backend/scripts/api-tests/cleanup_test_data.sql`: removes the seeded API test data
 - `backend/scripts/api-tests/smoke.sh`: lightweight health, auth, search, and preview checks
 - `backend/scripts/api-tests/full_regression.sh`: broader regression flow covering deposit, withdraw, idempotency, buy, sell, holdings, history, watchlist, and auth failure cases
 
-Seeded IDs used by the scripts:
+Required environment variables:
 
-- `userId=900001`
-- `assetId=900101`
-- `symbol=AAPLTST`
+- `TEST_USER_ID`
+- `TEST_ASSET_ID`
+- `TEST_SYMBOL`
 
 Recommended flow:
 
 1. Start the backend.
-2. Load `backend/scripts/api-tests/seed_test_data.sql` into your MySQL database.
+2. Ensure the configured `TEST_USER_ID` and `TEST_ASSET_ID` exist in your database, and `TEST_SYMBOL` matches that asset.
 3. Run one of the scripts below.
 
 Example:
 
 ```bash
 cd backend
+export TEST_USER_ID=1
+export TEST_ASSET_ID=101
+export TEST_SYMBOL=AAPL
 bash scripts/api-tests/smoke.sh
 bash scripts/api-tests/full_regression.sh
 ```
