@@ -38,7 +38,9 @@ public class RequestKeyFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return HttpMethod.OPTIONS.matches(request.getMethod()) || isDocumentationPath(request.getRequestURI());
+        return HttpMethod.OPTIONS.matches(request.getMethod())
+                || isDocumentationPath(request.getRequestURI())
+                || "/api/health".equals(request.getRequestURI());
     }
 
     @Override

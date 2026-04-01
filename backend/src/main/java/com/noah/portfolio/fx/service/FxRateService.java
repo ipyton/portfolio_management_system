@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.noah.portfolio.asset.client.YahooFinanceClient;
+import com.noah.portfolio.asset.client.TwelveDataClient;
 
 @Service
 public class FxRateService {
@@ -31,24 +31,24 @@ public class FxRateService {
     private static final Logger log = LoggerFactory.getLogger(FxRateService.class);
     private static final MathContext DIVISION_CONTEXT = new MathContext(12, RoundingMode.HALF_UP);
     private static final int SCALE = 8;
-    private static final String YAHOO_FINANCE = "YAHOO_FINANCE";
+    private static final String TWELVE_DATA = "TWELVE_DATA";
     private static final String SYSTEM = "SYSTEM";
 
     private final FxProperties fxProperties;
     private final FxRateLatestRepository fxRateLatestRepository;
     private final FxRateHistoryRepository fxRateHistoryRepository;
-    private final YahooFinanceClient yahooFinanceClient;
+    private final TwelveDataClient twelveDataClient;
 
     public FxRateService(
             FxProperties fxProperties,
             FxRateLatestRepository fxRateLatestRepository,
             FxRateHistoryRepository fxRateHistoryRepository,
-            YahooFinanceClient yahooFinanceClient
+            TwelveDataClient twelveDataClient
     ) {
         this.fxProperties = fxProperties;
         this.fxRateLatestRepository = fxRateLatestRepository;
         this.fxRateHistoryRepository = fxRateHistoryRepository;
-        this.yahooFinanceClient = yahooFinanceClient;
+        this.twelveDataClient = twelveDataClient;
     }
 
     @Transactional
@@ -69,28 +69,33 @@ public class FxRateService {
                 continue;
             }
 
-            String symbol = fxProperties.symbolFor(baseCurrency);
-            if (symbol == null || symbol.isBlank()) {
-                log.warn("Missing FX symbol mapping for currency {}", baseCurrency);
-                continue;
-            }
+            String symbol = resolveFxSymbol(baseCurrency, reportingCurrency);
 
-            Optional<BigDecimal> maybeRate = yahooFinanceClient.fetchRegularMarketPrice(symbol);
-            if (maybeRate.isEmpty()) {
-                log.warn("No FX rate returned for symbol {}", symbol);
-                continue;
-            }
+            try {
+                Optional<BigDecimal> maybeRate = twelveDataClient.fetchRegularMarketPrice(symbol);
+                if (maybeRate.isEmpty()) {
+                    log.warn("No FX rate returned for symbol {}", symbol);
+                    continue;
+                }
 
-            upsertLatest(
-                    baseCurrency,
-                    reportingCurrency,
-                    maybeRate.get().setScale(SCALE, RoundingMode.HALF_UP),
-                    YAHOO_FINANCE,
-                    symbol,
-                    syncedAt,
-                    fxProperties.isPersistHistory()
-            );
-            refreshed++;
+                upsertLatest(
+                        baseCurrency,
+                        reportingCurrency,
+                        maybeRate.get().setScale(SCALE, RoundingMode.HALF_UP),
+                        TWELVE_DATA,
+                        symbol,
+                        syncedAt,
+                        fxProperties.isPersistHistory()
+                );
+                refreshed++;
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Failed to refresh FX rate for {} via symbol {}. Keeping previous stored rate if present.",
+                        baseCurrency,
+                        symbol,
+                        ex
+                );
+            }
         }
 
         return refreshed;
@@ -147,8 +152,8 @@ public class FxRateService {
                     item.put("baseCurrency", baseCurrency);
                     item.put("quoteCurrency", quoteCurrency);
                     item.put("rate", maybeRate.get());
-                    item.put("source", YAHOO_FINANCE);
-                    item.put("symbol", baseCurrency.equals(quoteCurrency) ? null : fxProperties.symbolFor(baseCurrency));
+                    item.put("source", TWELVE_DATA);
+                    item.put("symbol", baseCurrency.equals(quoteCurrency) ? null : resolveFxSymbol(baseCurrency, quoteCurrency));
                     item.put("asOf", asOf);
                     item.put("stale", isStale(asOf));
                     return item;
@@ -221,6 +226,20 @@ public class FxRateService {
 
     private boolean isTrackable(String baseCurrency, String quoteCurrency) {
         return baseCurrency != null && !baseCurrency.isBlank() && !baseCurrency.equals(quoteCurrency);
+    }
+
+    private String resolveFxSymbol(String baseCurrency, String quoteCurrency) {
+        String configured = fxProperties.symbolFor(baseCurrency);
+        if (configured == null || configured.isBlank()) {
+            return baseCurrency + "/" + quoteCurrency;
+        }
+
+        String normalized = configured.trim().toUpperCase(Locale.ROOT);
+        // Backward compatibility for legacy Yahoo-style FX symbols (e.g. USDCNY=X).
+        if (normalized.matches("^[A-Z]{6}=X$")) {
+            return normalized.substring(0, 3) + "/" + normalized.substring(3, 6);
+        }
+        return normalized;
     }
 
     private String normalize(String currency) {

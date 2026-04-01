@@ -9,12 +9,18 @@ import com.noah.portfolio.asset.model.*;
 import com.noah.portfolio.asset.service.*;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
+
+    Optional<AssetEntity> findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(String symbol, AssetType assetType);
+
+    @Query("select coalesce(max(a.id), 0) from AssetEntity a")
+    Long findMaxId();
 
     @Query("""
             select distinct a

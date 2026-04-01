@@ -1,37 +1,25 @@
 import React, { useEffect, useState } from "react";
 import LangflowWidget from "./components/langflow";
-import AnalyticsPage, {
-  analyticsActivityFeed,
-  analyticsPageMeta,
-} from "./pages/analytics";
-import DashboardPage, {
-  dashboardActivityFeed,
-  dashboardPageMeta,
-} from "./pages/dashboard";
-import WatchlistPage, {
-  watchlistActivityFeed,
-  watchlistPageMeta,
-} from "./pages/watchlist";
 import Topbar from "./components/topbar";
+import AnalysisPage, { analysisPageMeta } from "./pages/analysis";
+import AnalyticsPage, { analyticsPageMeta } from "./pages/analytics";
+import WatchlistPage, { watchlistPageMeta } from "./pages/watchlist";
 
 const PAGES = {
   dashboard: {
     label: "Dashboard",
-    meta: dashboardPageMeta,
-    activityFeed: dashboardActivityFeed,
-    Component: DashboardPage,
+    meta: analyticsPageMeta,
+    Component: AnalyticsPage,
   },
   watchlist: {
     label: "Watchlist",
     meta: watchlistPageMeta,
-    activityFeed: watchlistActivityFeed,
     Component: WatchlistPage,
   },
-  analytics: {
-    label: "Analytics",
-    meta: analyticsPageMeta,
-    activityFeed: analyticsActivityFeed,
-    Component: AnalyticsPage,
+  analysis: {
+    label: "Analysis",
+    meta: analysisPageMeta,
+    Component: AnalysisPage,
   },
 };
 
@@ -42,7 +30,7 @@ const NAV_ITEMS = Object.entries(PAGES).map(([id, config]) => ({
 }));
 
 export default function App() {
-  const [activePage, setActivePage] = useState("analytics");
+  const [activePage, setActivePage] = useState("dashboard");
   const [isLoggedIn, setIsLoggedIn] = useState(true);
   const [theme, setTheme] = useState(() => {
     const savedTheme = window.localStorage.getItem("theme");
@@ -79,12 +67,7 @@ export default function App() {
 
       <div className="content-layer">
         <main className="layout">
-          <CurrentPage
-            label={pageConfig.label}
-            meta={pageConfig.meta}
-            activityFeed={pageConfig.activityFeed}
-            isLoggedIn={isLoggedIn}
-          />
+          <CurrentPage label={pageConfig.label} meta={pageConfig.meta} />
         </main>
       </div>
       
