@@ -1,11 +1,13 @@
 package com.noah.portfolio.asset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,8 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.noah.portfolio.asset.client.YahooFinanceClient;
-import com.noah.portfolio.asset.config.YahooFinanceProperties;
+import com.noah.portfolio.asset.client.EastmoneyClient;
+import com.noah.portfolio.asset.client.FinnhubClient;
+import com.noah.portfolio.asset.config.FinnhubProperties;
+import com.noah.portfolio.asset.client.TwelveDataClient;
+import com.noah.portfolio.asset.dto.AssetCandidate;
 import com.noah.portfolio.asset.dto.AssetSearchResponse;
 import com.noah.portfolio.asset.dto.AssetSuggestionResponse;
 import com.noah.portfolio.asset.dto.YahooFinanceDetail;
@@ -24,6 +29,7 @@ import com.noah.portfolio.asset.entity.AssetEntity;
 import com.noah.portfolio.asset.entity.AssetStockDetailEntity;
 import com.noah.portfolio.asset.model.AssetLatestPriceSnapshot;
 import com.noah.portfolio.asset.model.AssetType;
+import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
 import com.noah.portfolio.asset.service.AssetSearchService;
 
@@ -56,8 +62,14 @@ class AssetSearchServiceTest {
                 List.of(apple, applovin),
                 Map.of()
         );
-        StubYahooFinanceClient yahooFinanceClient = new StubYahooFinanceClient(Optional.empty(), Optional.empty());
-        AssetSearchService service = new AssetSearchService(repository, yahooFinanceClient);
+        StubFinnhubClient finnhubClient = new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of());
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                mock(AssetPriceDailyRepository.class),
+                finnhubClient,
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
+        );
 
         AssetSuggestionResponse response = service.suggest("  App  ", 2);
 
@@ -66,12 +78,13 @@ class AssetSearchServiceTest {
         assertThat(response.items()).extracting(item -> item.symbol()).containsExactly("AAPL", "APP");
         assertThat(repository.lastSearchQuery).isEqualTo("App");
         assertThat(repository.lastSearchLimit).isEqualTo(2);
-        assertThat(yahooFinanceClient.lastSearchQuery).isNull();
-        assertThat(yahooFinanceClient.lastFetchSymbol).isNull();
+        assertThat(finnhubClient.lastSearchQuery).isNull();
+        assertThat(finnhubClient.lastFetchSymbol).isNull();
+        assertThat(finnhubClient.lastSuggestionQuery).isNull();
     }
 
     @Test
-    void searchUsesDatabaseMatchAndFetchesYahooDetailByDatabaseSymbol() {
+    void searchUsesDatabaseMatchWithoutCallingExternalDetail() {
         AssetEntity asset = asset(
                 1L,
                 "AAPL",
@@ -104,11 +117,14 @@ class AssetSearchServiceTest {
                 List.of(asset),
                 Map.of(1L, new AssetLatestPriceSnapshot(1L, new BigDecimal("190.12"), LocalDate.of(2026, 3, 28)))
         );
-        StubYahooFinanceClient yahooFinanceClient = new StubYahooFinanceClient(
-                Optional.empty(),
-                Optional.of(yahooFinanceDetail)
+        StubFinnhubClient finnhubClient = new StubFinnhubClient(Optional.empty(), Optional.of(yahooFinanceDetail), List.of());
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                mock(AssetPriceDailyRepository.class),
+                finnhubClient,
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
         );
-        AssetSearchService service = new AssetSearchService(repository, yahooFinanceClient);
 
         AssetSearchResponse response = service.search("AAPL");
 
@@ -118,10 +134,10 @@ class AssetSearchServiceTest {
         assertThat(response.database().symbol()).isEqualTo("AAPL");
         assertThat(response.database().sector()).isEqualTo("Technology");
         assertThat(response.database().latestDbPrice()).isEqualByComparingTo("190.12");
-        assertThat(response.yahooFinance()).isEqualTo(yahooFinanceDetail);
+        assertThat(response.yahooFinance()).isNull();
         assertThat(response.databaseMatches()).hasSize(1);
         assertThat(repository.lastSearchQuery).isEqualTo("AAPL");
-        assertThat(yahooFinanceClient.lastFetchSymbol).isEqualTo("AAPL");
+        assertThat(finnhubClient.lastFetchSymbol).isNull();
     }
 
     @Test
@@ -139,22 +155,55 @@ class AssetSearchServiceTest {
         );
 
         StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(List.of(), Map.of());
-        StubYahooFinanceClient yahooFinanceClient = new StubYahooFinanceClient(
+        StubFinnhubClient finnhubClient = new StubFinnhubClient(
                 Optional.of(searchResult),
-                Optional.of(yahooFinanceDetail)
+                Optional.of(yahooFinanceDetail),
+                List.of()
         );
-        AssetSearchService service = new AssetSearchService(repository, yahooFinanceClient);
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                mock(AssetPriceDailyRepository.class),
+                finnhubClient,
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
+        );
 
         AssetSearchResponse response = service.search("microsoft");
 
-        assertThat(response.matchedSource()).isEqualTo("YAHOO_FINANCE");
+        assertThat(response.matchedSource()).isEqualTo("FINNHUB");
         assertThat(response.resolvedSymbol()).isEqualTo("MSFT");
         assertThat(response.database()).isNull();
         assertThat(response.yahooFinance()).isEqualTo(yahooFinanceDetail);
         assertThat(response.warnings()).isNotEmpty();
         assertThat(repository.lastSearchQuery).isEqualTo("microsoft");
-        assertThat(yahooFinanceClient.lastSearchQuery).isEqualTo("microsoft");
-        assertThat(yahooFinanceClient.lastFetchSymbol).isEqualTo("MSFT");
+        assertThat(finnhubClient.lastSearchQuery).isEqualTo("microsoft");
+        assertThat(finnhubClient.lastFetchSymbol).isEqualTo("MSFT");
+    }
+
+    @Test
+    void suggestUsesRemoteCandidatesOnlyWhenLocalIsEmpty() {
+        StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(List.of(), Map.of());
+        StubFinnhubClient finnhubClient = new StubFinnhubClient(
+                Optional.empty(),
+                Optional.empty(),
+                List.of(
+                        new YahooFinanceSearchResult("MSFT", "Microsoft", "Microsoft Corporation", "Common Stock", null, null),
+                        new YahooFinanceSearchResult("AAPL", "Apple", "Apple Inc.", "Common Stock", null, null)
+                )
+        );
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                mock(AssetPriceDailyRepository.class),
+                finnhubClient,
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
+        );
+
+        AssetSuggestionResponse response = service.suggest("a", 3);
+
+        assertThat(response.items()).extracting(AssetCandidate::symbol).containsExactly("MSFT", "AAPL");
+        assertThat(finnhubClient.lastSuggestionQuery).isEqualTo("a");
+        assertThat(finnhubClient.lastSuggestionLimit).isEqualTo(3);
     }
 
     private AssetEntity asset(
@@ -240,19 +289,24 @@ class AssetSearchServiceTest {
         }
     }
 
-    private static final class StubYahooFinanceClient extends YahooFinanceClient {
+    private static final class StubFinnhubClient extends FinnhubClient {
         private final Optional<YahooFinanceSearchResult> searchResult;
         private final Optional<YahooFinanceDetail> detailResult;
+        private final List<YahooFinanceSearchResult> suggestionResults;
         private String lastSearchQuery;
         private String lastFetchSymbol;
+        private String lastSuggestionQuery;
+        private Integer lastSuggestionLimit;
 
-        private StubYahooFinanceClient(
+        private StubFinnhubClient(
                 Optional<YahooFinanceSearchResult> searchResult,
-                Optional<YahooFinanceDetail> detailResult
+                Optional<YahooFinanceDetail> detailResult,
+                List<YahooFinanceSearchResult> suggestionResults
         ) {
-            super(RestClient.builder(), new ObjectMapper(), new YahooFinanceProperties());
+            super(RestClient.builder(), new ObjectMapper(), new FinnhubProperties());
             this.searchResult = searchResult;
             this.detailResult = detailResult;
+            this.suggestionResults = suggestionResults;
         }
 
         @Override
@@ -265,6 +319,13 @@ class AssetSearchServiceTest {
         public Optional<YahooFinanceDetail> fetchDetail(String symbol) {
             this.lastFetchSymbol = symbol;
             return detailResult;
+        }
+
+        @Override
+        public List<YahooFinanceSearchResult> searchCandidates(String query, int limit) {
+            this.lastSuggestionQuery = query;
+            this.lastSuggestionLimit = limit;
+            return new ArrayList<>(suggestionResults);
         }
     }
 }

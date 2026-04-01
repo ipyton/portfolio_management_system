@@ -12,9 +12,9 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 
 ## Environment variables
 
-- `DB_URL`
-- `DB_USERNAME`
-- `DB_PASSWORD`
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
 - `JPA_DDL_AUTO`
 - `JPA_SHOW_SQL`
 - `SERVER_PORT`
@@ -57,6 +57,22 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 cd backend
 mvn spring-boot:run
 ```
+
+Default local startup targets a MySQL container on `localhost:3306` with database `mydatabase`, user `myuser`, and password `MyUserPass123`.
+
+If you do not have MySQL running locally, use the built-in H2 integration profile for frontend/backend joint debugging:
+
+```bash
+cd backend
+SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
+```
+
+The `local` profile provides:
+
+- in-memory H2 database seeded with demo portfolio data
+- disabled schedulers and rate limiting
+- Yahoo Finance disabled so asset search stays deterministic
+- H2 console at `http://localhost:8080/h2-console`
 
 Every request must include the configured request key header:
 

@@ -75,22 +75,31 @@ public class FxRateService {
                 continue;
             }
 
-            Optional<BigDecimal> maybeRate = yahooFinanceClient.fetchRegularMarketPrice(symbol);
-            if (maybeRate.isEmpty()) {
-                log.warn("No FX rate returned for symbol {}", symbol);
-                continue;
-            }
+            try {
+                Optional<BigDecimal> maybeRate = yahooFinanceClient.fetchRegularMarketPrice(symbol);
+                if (maybeRate.isEmpty()) {
+                    log.warn("No FX rate returned for symbol {}", symbol);
+                    continue;
+                }
 
-            upsertLatest(
-                    baseCurrency,
-                    reportingCurrency,
-                    maybeRate.get().setScale(SCALE, RoundingMode.HALF_UP),
-                    YAHOO_FINANCE,
-                    symbol,
-                    syncedAt,
-                    fxProperties.isPersistHistory()
-            );
-            refreshed++;
+                upsertLatest(
+                        baseCurrency,
+                        reportingCurrency,
+                        maybeRate.get().setScale(SCALE, RoundingMode.HALF_UP),
+                        YAHOO_FINANCE,
+                        symbol,
+                        syncedAt,
+                        fxProperties.isPersistHistory()
+                );
+                refreshed++;
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Failed to refresh FX rate for {} via symbol {}. Keeping previous stored rate if present.",
+                        baseCurrency,
+                        symbol,
+                        ex
+                );
+            }
         }
 
         return refreshed;

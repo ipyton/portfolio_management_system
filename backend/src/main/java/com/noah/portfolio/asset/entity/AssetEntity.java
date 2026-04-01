@@ -67,6 +67,26 @@ public class AssetEntity {
     protected AssetEntity() {
     }
 
+    public AssetEntity(
+            Long id,
+            String symbol,
+            AssetType assetType,
+            String name,
+            String currency,
+            String exchange,
+            String region,
+            boolean benchmark
+    ) {
+        this.id = id;
+        this.symbol = symbol;
+        this.assetType = assetType;
+        this.name = name;
+        this.currency = currency;
+        this.exchange = exchange;
+        this.region = region;
+        this.benchmark = benchmark;
+    }
+
     public Long getId() {
         return id;
     }
