@@ -29,9 +29,6 @@ function NavigationLinks({ navItems, activePage, onPageChange }) {
             onClick={() => onPageChange(item.id)}
             aria-current={isActive ? "page" : undefined}
           >
-            <span className="breadcrumb-index">
-              {String(index + 1).padStart(2, "0")}
-            </span>
             <span>{item.label}</span>
           </button>
         );
@@ -40,17 +37,21 @@ function NavigationLinks({ navItems, activePage, onPageChange }) {
   );
 }
 
-/* Update the session and authentication logic here. */
-function SessionToggle({ isLoggedIn, onLoginToggle }) {
-  // Keep login-state switching isolated for easier auth integration later.
+/* Display authentication state and logout action. */
+function SessionState({ isLoggedIn, onLogout }) {
+  if (!isLoggedIn) {
+    return (
+      <span className="session-pill offline" role="status" aria-live="polite">
+        <span className="session-dot" />
+        Locked
+      </span>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      className={`session-pill${isLoggedIn ? "" : " offline"}`}
-      onClick={onLoginToggle}
-    >
+    <button type="button" className="session-pill" onClick={onLogout}>
       <span className="session-dot" />
-      {isLoggedIn ? "Logged in" : "Guest mode"}
+      Log out
     </button>
   );
 }
@@ -78,7 +79,7 @@ export default function Topbar({
   activePage,
   onPageChange,
   isLoggedIn,
-  onLoginToggle,
+  onLogout,
   theme,
   onThemeToggle,
 }) {
@@ -92,7 +93,7 @@ export default function Topbar({
           activePage={activePage}
           onPageChange={onPageChange}
         />
-        <SessionToggle isLoggedIn={isLoggedIn} onLoginToggle={onLoginToggle} />
+        <SessionState isLoggedIn={isLoggedIn} onLogout={onLogout} />
         <ThemeToggle theme={theme} onThemeToggle={onThemeToggle} />
       </div>
     </header>

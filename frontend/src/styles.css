@@ -1,10 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
 
 :root {
   color-scheme: dark;
   font-family: "Manrope", sans-serif;
   --font-ui: "Manrope", sans-serif;
-  --font-display: "Cormorant Garamond", serif;
+  --font-display: "Manrope", sans-serif;
   --body-bg: #090b10;
   --bg-gradient:
     radial-gradient(circle at top left, rgba(75, 98, 255, 0.1), transparent 24%),
@@ -316,6 +316,79 @@ button {
   position: relative;
   z-index: 1;
   padding-top: 112px;
+}
+
+.auth-gate {
+  width: min(720px, 100%);
+  margin: 0 auto;
+}
+
+.auth-gate h1 {
+  margin: 0;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+  width: min(420px, 100%);
+}
+
+.auth-label {
+  font-size: 0.74rem;
+  line-height: 1.1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.auth-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(108, 125, 158, 0.28);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text);
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(121, 168, 255, 0.16);
+}
+
+.auth-submit {
+  justify-self: start;
+  padding: 11px 18px;
+  border: 1px solid rgba(121, 168, 255, 0.32);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(79, 123, 255, 0.9), rgba(57, 89, 207, 0.95));
+  color: #f8fbff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auth-submit:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.auth-error,
+.auth-hint {
+  margin: 0;
+}
+
+.auth-error {
+  color: #ff9ba2;
+}
+
+.auth-hint {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .auth-input {
+  background: #ffffff;
+  color: #111827;
 }
 
 .layout {

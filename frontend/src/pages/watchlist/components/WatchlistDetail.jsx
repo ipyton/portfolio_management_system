@@ -14,6 +14,7 @@ export default function WatchlistDetail({
   onTrade,
   onRemove,
   isRemoving,
+  interactionDisabled,
 }) {
   const chartData = useMemo(() => selected?.priceHistory ?? [], [selected]);
 
@@ -75,16 +76,16 @@ export default function WatchlistDetail({
         <div className="stat">Max Drawdown: {selected.drawdown}</div>
       </div>
       <div className="action-row">
-        <button type="button" onClick={() => onTrade("buy")}>
+        <button type="button" onClick={() => onTrade("buy")} disabled={interactionDisabled}>
           Buy
         </button>
-        <button type="button" onClick={() => onTrade("sell")}>
+        <button type="button" onClick={() => onTrade("sell")} disabled={interactionDisabled}>
           Sell
         </button>
         <button
           type="button"
           onClick={onRemove}
-          disabled={Boolean(isRemoving)}
+          disabled={Boolean(isRemoving) || interactionDisabled}
         >
           {isRemoving ? "Removing..." : "Remove"}
         </button>
@@ -92,6 +93,7 @@ export default function WatchlistDetail({
           type="button"
           className={`icon-btn${selected.isFavourite ? " is-favourite" : ""}`}
           aria-label="Favourite"
+          disabled={interactionDisabled}
           onClick={() => onToggleFavourite(selected.symbol)}
         >
           {selected.isFavourite ? "★" : "☆"}

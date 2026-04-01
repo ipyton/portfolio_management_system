@@ -1,17 +1,103 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const REQUEST_KEY_HEADER =
   import.meta.env.VITE_REQUEST_KEY_HEADER || "X-Request-Key";
-const REQUEST_KEY =
-  import.meta.env.VITE_REQUEST_KEY || "ef928c10-2da4-4ca6-9b49-dedc912d5b4c";
+const AUTH_PASSWORD_STORAGE_KEY = "portfolio-auth-password";
+
+function getSessionStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.sessionStorage;
+}
+
+function readStoredAuthPassword() {
+  const storage = getSessionStorage();
+  if (!storage) {
+    return "";
+  }
+  return storage.getItem(AUTH_PASSWORD_STORAGE_KEY) || "";
+}
+
+let authPassword = readStoredAuthPassword();
 
 export const DEFAULT_USER_ID = Number(import.meta.env.VITE_DEFAULT_USER_ID || 1);
+
+function resolveErrorMessage(payload, fallbackMessage) {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload;
+  }
+  if (typeof payload?.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+  if (typeof payload?.error === "string" && payload.error.trim()) {
+    return payload.error;
+  }
+  return fallbackMessage;
+}
+
+async function parseResponsePayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+  return response.text();
+}
+
+function createHttpError(response, payload, fallbackMessage) {
+  const error = new Error(resolveErrorMessage(payload, fallbackMessage));
+  error.status = response.status;
+  error.payload = payload;
+  return error;
+}
+
+export function hasAuthPassword() {
+  return Boolean(authPassword);
+}
+
+export function setAuthPassword(nextPassword) {
+  authPassword = String(nextPassword || "");
+  const storage = getSessionStorage();
+  if (!storage) {
+    return;
+  }
+  if (authPassword) {
+    storage.setItem(AUTH_PASSWORD_STORAGE_KEY, authPassword);
+    return;
+  }
+  storage.removeItem(AUTH_PASSWORD_STORAGE_KEY);
+}
+
+export function clearAuthPassword() {
+  setAuthPassword("");
+}
+
+export async function verifyAuthPassword(candidatePassword) {
+  const password = String(candidatePassword || "");
+  if (!password.trim()) {
+    throw new Error("Password is required");
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+    method: "GET",
+    headers: {
+      [REQUEST_KEY_HEADER]: password,
+    },
+  });
+  const payload = await parseResponsePayload(response);
+
+  if (!response.ok) {
+    throw createHttpError(response, payload, "Authentication failed");
+  }
+
+  return payload;
+}
 
 export async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   let body = options.body;
 
-  if (REQUEST_KEY) {
-    headers.set(REQUEST_KEY_HEADER, REQUEST_KEY);
+  if (authPassword) {
+    headers.set(REQUEST_KEY_HEADER, authPassword);
   }
 
   if (body && typeof body === "object" && !(body instanceof FormData)) {
@@ -25,17 +111,10 @@ export async function apiFetch(path, options = {}) {
     body,
   });
 
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
-    ? await response.json()
-    : await response.text();
+  const payload = await parseResponsePayload(response);
 
   if (!response.ok) {
-    const message =
-      typeof payload === "string"
-        ? payload
-        : payload?.message || payload?.error || "Request failed";
-    throw new Error(message);
+    throw createHttpError(response, payload, "Request failed");
   }
 
   return payload;

@@ -27,6 +27,7 @@ export const watchlistActivityFeed = [
 ];
 
 const HISTORY_LOOKBACK_DAYS = 180;
+const FAV_STORAGE_KEY = `watchlist-favourites-${DEFAULT_USER_ID}`;
 
 const toFiniteNumber = (value, fallback = 0) => {
   const normalized = Number(value);
@@ -44,7 +45,108 @@ const parseMetric = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-function mapWatchlistItemToRow(item, existingRow) {
+function loadFavouriteSymbols() {
+  try {
+    const raw = window.localStorage.getItem(FAV_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) {
+      return new Set();
+    }
+    return new Set(list.map((item) => String(item).toUpperCase()));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavouriteSymbols(rows) {
+  const symbols = rows
+    .filter((row) => row.isFavourite)
+    .map((row) => row.symbol.toUpperCase());
+  window.localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(symbols));
+}
+
+function normalizeHorizonMonths(daysCount) {
+  if (daysCount >= 500) return 36;
+  if (daysCount >= 240) return 12;
+  if (daysCount >= 120) return 6;
+  if (daysCount >= 60) return 3;
+  return 1;
+}
+
+function computeHistoryInsights(history, currency) {
+  if (!history?.length) {
+    return null;
+  }
+
+  const first = Number(history[0].price);
+  const last = Number(history[history.length - 1].price);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first <= 0) {
+    return null;
+  }
+
+  const prev = Number(history[history.length - 2]?.price);
+  const dailyChange = Number.isFinite(prev) ? last - prev : null;
+  const dailyChangePercent = Number.isFinite(prev) && prev > 0 ? last / prev - 1 : null;
+  const totalReturn = last / first - 1;
+
+  const dailyReturns = [];
+  for (let index = 1; index < history.length; index += 1) {
+    const prior = Number(history[index - 1].price);
+    const current = Number(history[index].price);
+    if (!Number.isFinite(prior) || !Number.isFinite(current) || prior <= 0) {
+      continue;
+    }
+    dailyReturns.push(current / prior - 1);
+  }
+
+  let sharpe = null;
+  if (dailyReturns.length > 1) {
+    const avg = dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length;
+    const variance = dailyReturns.reduce((sum, value) => sum + (value - avg) ** 2, 0)
+      / (dailyReturns.length - 1);
+    const std = Math.sqrt(Math.max(variance, 0));
+    if (std > 1e-8) {
+      sharpe = (avg / std) * Math.sqrt(252);
+    }
+  }
+
+  let peak = first;
+  let maxDrawdown = 0;
+  history.forEach((point) => {
+    const price = Number(point.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      return;
+    }
+    if (price > peak) {
+      peak = price;
+    }
+    const drawdown = price / peak - 1;
+    if (drawdown < maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  });
+
+  return {
+    returnPct: formatSignedPercent(totalReturn),
+    sharpe: sharpe === null ? "N/A" : Number(sharpe).toFixed(2),
+    drawdown: formatSignedPercent(maxDrawdown),
+    horizonMonths: normalizeHorizonMonths(history.length),
+    returns: {
+      Daily: formatSignedPercent(dailyChangePercent),
+      Change:
+        dailyChange === null
+          ? "N/A"
+          : `${dailyChange > 0 ? "+" : ""}${dailyChange.toFixed(2)}`,
+      Total: formatSignedPercent(totalReturn),
+      Price: formatCurrency(last, currency || "USD"),
+    },
+  };
+}
+
+function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite) {
   const symbol = item?.symbol || "UNKNOWN";
   const latestClose = toFiniteNumber(item?.latestClose, 0);
   const dailyChange = item?.dailyChange;
@@ -53,21 +155,22 @@ function mapWatchlistItemToRow(item, existingRow) {
       ? "N/A"
       : `${dailyChange > 0 ? "+" : ""}${toFiniteNumber(dailyChange).toFixed(2)}`;
   const dailyChangePercentText = formatSignedPercent(item?.dailyChangePercent);
+  const holdingShares = toFiniteNumber(holdingItem?.quantity, existingRow?.holdingShares || 0);
 
   return {
     watchlistId: item?.watchlistId ?? null,
     assetId: item?.assetId ?? null,
     symbol,
     name: item?.name || symbol,
-    type: "Stock",
-    isHolding: existingRow?.isHolding || false,
-    isFavourite: existingRow?.isFavourite || false,
+    type: existingRow?.type || "Stock",
+    isHolding: holdingShares > 0,
+    isFavourite: Boolean(isFavourite),
     popularity: existingRow?.popularity || 0,
     salesVolume: existingRow?.salesVolume || 0,
     horizonMonths: existingRow?.horizonMonths || 1,
-    holdingShares: existingRow?.holdingShares || 0,
-    returnPct: dailyChangePercentText,
-    returns: {
+    holdingShares,
+    returnPct: existingRow?.returnPct || dailyChangePercentText,
+    returns: existingRow?.returns || {
       Daily: dailyChangePercentText,
       Change: dailyChangeText,
       Price: formatCurrency(latestClose, item?.currency || "USD"),
@@ -91,7 +194,7 @@ function mapWatchlistItemToRow(item, existingRow) {
   };
 }
 
-export default function WatchlistPage() {
+export default function WatchlistPage({ isLoggedIn = true }) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
@@ -111,20 +214,58 @@ export default function WatchlistPage() {
   const [tradeModal, setTradeModal] = useState({ open: false, type: null });
   const [tradeAmount, setTradeAmount] = useState("");
   const [tradeCashAmount, setTradeCashAmount] = useState("");
+  const [tradeSubmitting, setTradeSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState("");
+  const [cashByCurrency, setCashByCurrency] = useState({});
   const rowsRef = useRef(rows);
+  const loadedHistorySymbolsRef = useRef(new Set());
+  const loadingHistorySymbolsRef = useRef(new Set());
 
-  const cashBalance = 125000;
-  const numericAmount = Number.parseFloat(tradeAmount || "0");
-  const isOverBalance = numericAmount > cashBalance;
-  const holdingLimit = selected?.type === "Bond"
-    ? Number(selected?.holdingCash || 0)
-    : Number(selected?.holdingShares || 0);
-  const isOverHolding = tradeModal.type === "sell" && numericAmount > holdingLimit;
+  const requireLogin = useCallback(
+    (actionLabel) => {
+      if (isLoggedIn) {
+        return true;
+      }
+      setNotice("");
+      setError(`Guest mode cannot ${actionLabel}. Switch to Logged in to continue.`);
+      return false;
+    },
+    [isLoggedIn],
+  );
+
+  const cashBalance = useMemo(() => {
+    const selectedCurrency = (selected?.currency || "").toUpperCase();
+    if (selectedCurrency && Number.isFinite(cashByCurrency[selectedCurrency])) {
+      return cashByCurrency[selectedCurrency];
+    }
+    const firstBalance = Object.values(cashByCurrency)[0];
+    return Number.isFinite(firstBalance) ? firstBalance : 0;
+  }, [cashByCurrency, selected?.currency]);
+
+  const numericShareAmount = Number.parseFloat(tradeAmount || "0");
+  const numericCashAmount = Number.parseFloat(tradeCashAmount || "0");
   const latestPrice =
     selected?.priceHistory?.[selected.priceHistory.length - 1]?.price
     || selected?.latestClose
     || 0;
+  const effectiveTradeQuantity = tradeAmount
+    ? numericShareAmount
+    : (numericCashAmount > 0 && latestPrice > 0 ? numericCashAmount / latestPrice : 0);
+  const requiredCash = tradeAmount
+    ? numericShareAmount * latestPrice
+    : numericCashAmount;
+
+  const isOverBalance =
+    tradeModal.type === "buy"
+    && Number.isFinite(requiredCash)
+    && requiredCash > cashBalance;
+
+  const holdingLimit = Number(selected?.holdingShares || 0);
+  const isOverHolding =
+    tradeModal.type === "sell"
+    && Number.isFinite(effectiveTradeQuantity)
+    && effectiveTradeQuantity > holdingLimit;
+
   const stockCashValue = selected?.holdingShares
     ? selected.holdingShares * latestPrice
     : 0;
@@ -134,20 +275,55 @@ export default function WatchlistPage() {
     rowsRef.current = rows;
   }, [rows]);
 
+  useEffect(() => {
+    if (!isLoggedIn && tradeModal.open) {
+      setTradeModal({ open: false, type: null });
+      setTradeAmount("");
+      setTradeCashAmount("");
+    }
+  }, [isLoggedIn, tradeModal.open]);
+
   const loadWatchlist = useCallback(async () => {
     setLoading(true);
     setError("");
 
     try {
-      const response = await apiFetch(`/api/watchlists?userId=${DEFAULT_USER_ID}`);
+      const [watchlistResponse, holdingsResponse, cashResponse] = await Promise.all([
+        apiFetch(`/api/watchlists?userId=${DEFAULT_USER_ID}`),
+        apiFetch(`/api/holdings?userId=${DEFAULT_USER_ID}`).catch(() => ({ items: [] })),
+        apiFetch(`/api/cash-accounts?userId=${DEFAULT_USER_ID}`).catch(() => ({ items: [] })),
+      ]);
+
       const previousBySymbol = new Map(
-        rowsRef.current.map((row) => [row.symbol, row]),
+        rowsRef.current.map((row) => [row.symbol.toUpperCase(), row]),
       );
-      const nextRows = (response?.items || []).map((item) =>
-        mapWatchlistItemToRow(item, previousBySymbol.get(item.symbol)),
+      const holdingBySymbol = new Map(
+        (holdingsResponse?.items || []).map((item) => [String(item.symbol || "").toUpperCase(), item]),
       );
+      const favouriteSymbols = loadFavouriteSymbols();
+
+      const nextRows = (watchlistResponse?.items || []).map((item) => {
+        const symbolKey = String(item?.symbol || "").toUpperCase();
+        const previous = previousBySymbol.get(symbolKey);
+        return mapWatchlistItemToRow(
+          item,
+          previous,
+          holdingBySymbol.get(symbolKey),
+          favouriteSymbols.has(symbolKey) || previous?.isFavourite,
+        );
+      });
+
+      const nextCashByCurrency = {};
+      (cashResponse?.items || []).forEach((item) => {
+        const currency = String(item?.currency || "").toUpperCase();
+        if (!currency) {
+          return;
+        }
+        nextCashByCurrency[currency] = toFiniteNumber(item?.availableBalance, toFiniteNumber(item?.balance, 0));
+      });
 
       setRows(nextRows);
+      setCashByCurrency(nextCashByCurrency);
       setSelected((current) => {
         if (!current) {
           return null;
@@ -169,6 +345,92 @@ export default function WatchlistPage() {
   useEffect(() => {
     loadWatchlist();
   }, [loadWatchlist]);
+
+  const applyHistoryToSymbol = useCallback((symbol, history) => {
+    const symbolKey = String(symbol || "").toUpperCase();
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (String(row.symbol || "").toUpperCase() !== symbolKey) {
+          return row;
+        }
+        const insights = computeHistoryInsights(history, row.currency);
+        return {
+          ...row,
+          priceHistory: history,
+          ...(insights || {}),
+        };
+      }),
+    );
+    setSelected((current) => {
+      if (!current || String(current.symbol || "").toUpperCase() !== symbolKey) {
+        return current;
+      }
+      const insights = computeHistoryInsights(history, current.currency);
+      return {
+        ...current,
+        priceHistory: history,
+        ...(insights || {}),
+      };
+    });
+  }, []);
+
+  const hydrateHistoryForSymbol = useCallback(async (symbol, reportError = false) => {
+    const symbolKey = String(symbol || "").toUpperCase();
+    if (!symbolKey) {
+      return;
+    }
+    if (loadedHistorySymbolsRef.current.has(symbolKey)) {
+      return;
+    }
+    if (loadingHistorySymbolsRef.current.has(symbolKey)) {
+      return;
+    }
+
+    loadingHistorySymbolsRef.current.add(symbolKey);
+    if (String(selected?.symbol || "").toUpperCase() === symbolKey) {
+      setLoadingHistoryFor(symbolKey);
+    }
+
+    try {
+      const response = await apiFetch(
+        `/api/assets/price-history?query=${encodeURIComponent(symbolKey)}&days=${HISTORY_LOOKBACK_DAYS}`,
+      );
+      const history = (response?.items || [])
+        .map((item) => ({
+          date: item.tradeDate,
+          price: toFiniteNumber(item.close, NaN),
+        }))
+        .filter((point) => Number.isFinite(point.price));
+      applyHistoryToSymbol(symbolKey, history);
+      loadedHistorySymbolsRef.current.add(symbolKey);
+    } catch (requestError) {
+      if (reportError) {
+        setError(
+          requestError.message || `Failed to load price history for ${symbolKey}.`,
+        );
+      }
+    } finally {
+      loadingHistorySymbolsRef.current.delete(symbolKey);
+      setLoadingHistoryFor((current) => (current === symbolKey ? "" : current));
+    }
+  }, [applyHistoryToSymbol, selected?.symbol]);
+
+  useEffect(() => {
+    rows.forEach((row) => {
+      if (!row?.symbol || row?.priceHistory?.length) {
+        return;
+      }
+      void hydrateHistoryForSymbol(row.symbol);
+    });
+  }, [rows, hydrateHistoryForSymbol]);
+
+  useEffect(() => {
+    const symbol = String(selected?.symbol || "").toUpperCase();
+    if (!symbol || selected?.priceHistory?.length) {
+      return;
+    }
+    void hydrateHistoryForSymbol(symbol, true);
+  }, [selected?.symbol, selected?.priceHistory?.length, hydrateHistoryForSymbol]);
 
   useEffect(() => {
     const keyword = searchTerm.trim();
@@ -211,59 +473,11 @@ export default function WatchlistPage() {
     };
   }, [searchTerm]);
 
-  useEffect(() => {
-    const symbol = selected?.symbol;
-    if (!symbol || selected?.priceHistory?.length) {
-      return undefined;
+  const addSymbolToWatchlist = useCallback(async (candidate) => {
+    if (!requireLogin("add symbols to watchlist")) {
+      return;
     }
 
-    let disposed = false;
-    const loadHistory = async () => {
-      setLoadingHistoryFor(symbol);
-      try {
-        const response = await apiFetch(
-          `/api/assets/price-history?query=${encodeURIComponent(symbol)}&days=${HISTORY_LOOKBACK_DAYS}`,
-        );
-        if (disposed) {
-          return;
-        }
-        const history = (response?.items || [])
-          .map((item) => ({
-            date: item.tradeDate,
-            price: toFiniteNumber(item.close, NaN),
-          }))
-          .filter((point) => Number.isFinite(point.price));
-
-        setRows((currentRows) =>
-          currentRows.map((row) =>
-            row.symbol === symbol ? { ...row, priceHistory: history } : row,
-          ),
-        );
-        setSelected((current) =>
-          current && current.symbol === symbol
-            ? { ...current, priceHistory: history }
-            : current,
-        );
-      } catch (requestError) {
-        if (!disposed) {
-          setError(
-            requestError.message || `Failed to load price history for ${symbol}.`,
-          );
-        }
-      } finally {
-        if (!disposed) {
-          setLoadingHistoryFor("");
-        }
-      }
-    };
-
-    loadHistory();
-    return () => {
-      disposed = true;
-    };
-  }, [selected?.symbol, selected?.priceHistory?.length]);
-
-  const addSymbolToWatchlist = useCallback(async (candidate) => {
     if (!candidate?.symbol) {
       return;
     }
@@ -284,11 +498,12 @@ export default function WatchlistPage() {
         method: "POST",
         body: payload,
       });
-      const row = mapWatchlistItemToRow(created, null);
+      const row = mapWatchlistItemToRow(created, null, null, false);
       setRows((currentRows) => [row, ...currentRows.filter((item) => item.symbol !== row.symbol)]);
       setSelected(row);
       setNotice(`${row.symbol} has been added to watchlist.`);
-      setSearchTerm(row.symbol);
+      setSearchTerm("");
+      setSuggestionRows([]);
       setShowSuggestions(false);
     } catch (requestError) {
       setError(requestError.message || "Failed to add the symbol to watchlist.");
@@ -296,9 +511,13 @@ export default function WatchlistPage() {
     } finally {
       setSavingSymbol("");
     }
-  }, [loadWatchlist]);
+  }, [loadWatchlist, requireLogin]);
 
   const removeSelectedFromWatchlist = useCallback(async () => {
+    if (!requireLogin("remove symbols from watchlist")) {
+      return;
+    }
+
     if (!selected?.assetId) {
       return;
     }
@@ -311,9 +530,11 @@ export default function WatchlistPage() {
         `/api/watchlists/${selected.assetId}?userId=${DEFAULT_USER_ID}`,
         { method: "DELETE" },
       );
-      setRows((currentRows) =>
-        currentRows.filter((row) => row.assetId !== selected.assetId),
-      );
+      setRows((currentRows) => {
+        const nextRows = currentRows.filter((row) => row.assetId !== selected.assetId);
+        saveFavouriteSymbols(nextRows);
+        return nextRows;
+      });
       setSelected(null);
       setNotice(`${selected.symbol} has been removed from watchlist.`);
     } catch (requestError) {
@@ -321,7 +542,94 @@ export default function WatchlistPage() {
     } finally {
       setSavingSymbol("");
     }
-  }, [selected]);
+  }, [selected, requireLogin]);
+
+  const submitTrade = useCallback(async () => {
+    if (!requireLogin("submit trades")) {
+      return;
+    }
+
+    if (!selected?.assetId || !tradeModal.type) {
+      return;
+    }
+
+    const normalizedQuantity = Number(effectiveTradeQuantity);
+    if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+      setError("Enter a valid share amount or cash amount before submitting.");
+      return;
+    }
+
+    if (tradeModal.type === "buy" && isOverBalance) {
+      setError("Insufficient available cash balance for this buy order.");
+      return;
+    }
+
+    if (tradeModal.type === "sell" && isOverHolding) {
+      setError("Insufficient holding quantity for this sell order.");
+      return;
+    }
+
+    const normalizedPrice = Number(latestPrice);
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
+      setError(`Missing valid latest price for ${selected.symbol}.`);
+      return;
+    }
+
+    setTradeSubmitting(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const endpoint = tradeModal.type === "buy" ? "/api/trades/buy" : "/api/trades/sell";
+      const bizId = `watchlist-${tradeModal.type}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+
+      await apiFetch(endpoint, {
+        method: "POST",
+        body: {
+          userId: DEFAULT_USER_ID,
+          assetId: selected.assetId,
+          quantity: Number(normalizedQuantity.toFixed(6)),
+          price: Number(normalizedPrice.toFixed(6)),
+          fee: 0,
+          bizId,
+          note: `Submitted from watchlist (${tradeModal.type})`,
+        },
+      });
+
+      const side = tradeModal.type === "buy" ? "buy" : "sell";
+      setConfirmation(
+        `${selected.symbol} ${side} order submitted: ${normalizedQuantity.toFixed(4)} shares @ ${normalizedPrice.toFixed(4)}.`,
+      );
+      setTradeModal({ open: false, type: null });
+      setTradeAmount("");
+      setTradeCashAmount("");
+      await loadWatchlist();
+    } catch (requestError) {
+      setError(requestError.message || "Failed to submit trade.");
+    } finally {
+      setTradeSubmitting(false);
+    }
+  }, [
+    selected,
+    tradeModal.type,
+    effectiveTradeQuantity,
+    isOverBalance,
+    isOverHolding,
+    latestPrice,
+    loadWatchlist,
+    requireLogin,
+  ]);
+
+  const hasBondRows = useMemo(
+    () => rows.some((row) => row.type === "Bond"),
+    [rows],
+  );
+
+  useEffect(() => {
+    if (activeTab === "bonds" && !hasBondRows) {
+      setActiveTab("all");
+    }
+  }, [activeTab, hasBondRows]);
 
   const filteredRows = useMemo(
     () =>
@@ -335,7 +643,7 @@ export default function WatchlistPage() {
         })
         .filter((row) => {
           if (!searchTerm) return true;
-          const value = `${row.symbol} ${row.type}`.toLowerCase();
+          const value = `${row.symbol} ${row.type} ${row.name}`.toLowerCase();
           return value.includes(searchTerm.toLowerCase());
         }),
     [rows, activeTab, searchTerm],
@@ -349,9 +657,15 @@ export default function WatchlistPage() {
     "3 Years": 36,
   };
 
-  const horizonFilteredRows = showRankings
-    ? filteredRows.filter((row) => row.horizonMonths === horizonMap[rankingHorizon])
-    : filteredRows;
+  const horizonFilteredRows = useMemo(() => {
+    if (!showRankings) {
+      return filteredRows;
+    }
+
+    const minHorizon = horizonMap[rankingHorizon] || 1;
+    const matched = filteredRows.filter((row) => (row.horizonMonths || 1) >= minHorizon);
+    return matched.length ? matched : filteredRows;
+  }, [showRankings, filteredRows, rankingHorizon]);
 
   const metricValue = (row) => {
     if (rankingMetric === "return") return parseMetric(row.returnPct);
@@ -398,14 +712,21 @@ export default function WatchlistPage() {
           }}
         />
       </header>
+      {!isLoggedIn && (
+        <p className="watchlist-note">
+          Guest mode: view and search only. Add, remove, favourite, and trade actions are disabled.
+        </p>
+      )}
       {loading && <p className="watchlist-note">Loading watchlist...</p>}
       {loadingHistoryFor && (
         <p className="watchlist-note">
           Loading {loadingHistoryFor} price history...
         </p>
       )}
-      {savingSymbol && (
-        <p className="watchlist-note">Syncing {savingSymbol}...</p>
+      {(savingSymbol || tradeSubmitting) && (
+        <p className="watchlist-note">
+          {tradeSubmitting ? "Submitting trade..." : `Syncing ${savingSymbol}...`}
+        </p>
       )}
       {notice && <p className="watchlist-note">{notice}</p>}
       {error && <p className="inline-error">{error}</p>}
@@ -429,19 +750,26 @@ export default function WatchlistPage() {
           onRankingOrderChange={setRankingOrder}
           rankingHorizon={rankingHorizon}
           onRankingHorizonChange={setRankingHorizon}
+          showBondTab={hasBondRows}
         />
         <WatchlistDetail
           selected={selected}
           isRemoving={savingSymbol === selected?.symbol}
+          interactionDisabled={!isLoggedIn}
           onRemove={removeSelectedFromWatchlist}
           onToggleFavourite={(symbol) => {
-            setRows((current) =>
-              current.map((row) =>
+            if (!requireLogin("toggle favourites")) {
+              return;
+            }
+            setRows((current) => {
+              const nextRows = current.map((row) =>
                 row.symbol === symbol
                   ? { ...row, isFavourite: !row.isFavourite }
                   : row,
-              ),
-            );
+              );
+              saveFavouriteSymbols(nextRows);
+              return nextRows;
+            });
             setSelected((current) =>
               current && current.symbol === symbol
                 ? { ...current, isFavourite: !current.isFavourite }
@@ -449,6 +777,9 @@ export default function WatchlistPage() {
             );
           }}
           onTrade={(type) => {
+            if (!requireLogin("open trade orders")) {
+              return;
+            }
             setTradeAmount("");
             setTradeCashAmount("");
             setTradeModal({ open: true, type });
@@ -471,6 +802,9 @@ export default function WatchlistPage() {
         calculatedCash={calculatedCash}
         confirmation={confirmation}
         setConfirmation={setConfirmation}
+        onConfirmTrade={submitTrade}
+        tradeSubmitting={tradeSubmitting}
+        interactionDisabled={!isLoggedIn}
       />
     </section>
   );

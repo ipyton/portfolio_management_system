@@ -29,7 +29,7 @@ cors:
 security:
   request-key:
     header-name: ${REQUEST_KEY_HEADER:X-Request-Key}
-    value: ${REQUEST_KEY:ef928c10-2da4-4ca6-9b49-dedc912d5b4c}
+    value: ${REQUEST_KEY:BeautifulPortfolio12345}
 resilience:
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
