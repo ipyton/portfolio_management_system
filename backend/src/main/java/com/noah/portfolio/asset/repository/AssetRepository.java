@@ -42,4 +42,18 @@ public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
             a.symbol asc
             """)
     List<AssetEntity> searchStocks(@Param("keyword") String keyword);
+
+    @Query("""
+            select a
+            from AssetEntity a
+            where a.assetType = com.noah.portfolio.asset.model.AssetType.INDEX
+                and a.benchmark = true
+            order by
+                case when a.region is null then 1 else 0 end,
+                a.region asc,
+                a.symbol asc
+            """)
+    List<AssetEntity> findBenchmarkIndices();
+
+    List<AssetEntity> findAllByAssetTypeOrderBySymbolAsc(AssetType assetType);
 }

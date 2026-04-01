@@ -24,6 +24,7 @@ public class PortfolioSimulationService {
 
     private static final double EPSILON = 1e-10;
     private static final int DEFAULT_SAMPLE_PATHS = 8;
+    private static final int STUDENT_T_DEGREES_OF_FREEDOM = 6;
 
     public WienerSimulationResponse simulatePortfolio(WienerSimulationRequest request) {
         int n = request.assetCount();
@@ -66,9 +67,10 @@ public class PortfolioSimulationService {
                 }
 
                 double[] correlated = matVec(cholesky, z);
+                double tScale = studentTScale(random, STUDENT_T_DEGREES_OF_FREEDOM);
                 for (int i = 0; i < n; i++) {
                     double drift = (annualReturns[i] - 0.5 * annualVolatilities[i] * annualVolatilities[i]) * dt;
-                    double diffusion = annualVolatilities[i] * sqrtDt * correlated[i];
+                    double diffusion = annualVolatilities[i] * sqrtDt * correlated[i] * tScale;
                     prices[i] = prices[i] * Math.exp(drift + diffusion);
                 }
 
@@ -86,7 +88,8 @@ public class PortfolioSimulationService {
         if (!approximatelyOne(rawWeightSum, 1e-8)) {
             warnings.add("Input weights were normalized to sum to 1.");
         }
-        warnings.add("GBM simulation assumes constant annual drift/volatility and static correlation.");
+        warnings.add("GBM simulation uses standardized Student-t shocks (df=" + STUDENT_T_DEGREES_OF_FREEDOM
+                + ") with constant annual drift/volatility and static correlation.");
 
         return new WienerSimulationResponse(
                 n,
@@ -325,6 +328,23 @@ public class PortfolioSimulationService {
             out[i] = sum;
         }
         return out;
+    }
+
+    private double studentTScale(Random random, int degreesOfFreedom) {
+        if (degreesOfFreedom <= 2) {
+            throw new IllegalArgumentException("degreesOfFreedom must be greater than 2.");
+        }
+        double chiSquare = chiSquare(random, degreesOfFreedom);
+        return Math.sqrt((degreesOfFreedom - 2.0) / chiSquare);
+    }
+
+    private double chiSquare(Random random, int degreesOfFreedom) {
+        double sum = 0.0;
+        for (int i = 0; i < degreesOfFreedom; i++) {
+            double g = random.nextGaussian();
+            sum += g * g;
+        }
+        return sum;
     }
 
     private double weightedPriceValue(double[] prices, double[] weights) {

@@ -70,6 +70,17 @@ function AssistantChart({ option }) {
 
     const chart = echarts.init(chartRef.current);
     chart.setOption(option, true);
+    // Ensure chart fits after bubble layout settles.
+    const rafId = window.requestAnimationFrame(() => {
+      chart.resize();
+    });
+    let observer;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        chart.resize();
+      });
+      observer.observe(chartRef.current);
+    }
 
     const handleResize = () => {
       chart.resize();
@@ -77,6 +88,8 @@ function AssistantChart({ option }) {
     window.addEventListener("resize", handleResize);
 
     return () => {
+      window.cancelAnimationFrame(rafId);
+      observer?.disconnect();
       window.removeEventListener("resize", handleResize);
       chart.dispose();
     };
@@ -89,7 +102,7 @@ function AssistantChart({ option }) {
       ref={chartRef}
       sx={{
         width: "100%",
-        height: 260,
+        height: { xs: 240, sm: 300 },
         mt: 1,
         border: "1px solid",
         borderColor: "divider",
@@ -122,6 +135,17 @@ export default function LangflowWidget() {
     if (Number.isNaN(chatUserId)) return "Invalid `VITE_CHATBOT_USER_ID`.";
     return "";
   }, []);
+  const hasAnyChart = useMemo(
+    () =>
+      messages.some(
+        (item) =>
+          item?.graphOption &&
+          typeof item.graphOption === "object" &&
+          !Array.isArray(item.graphOption) &&
+          Object.keys(item.graphOption).length > 0,
+      ),
+    [messages],
+  );
 
   const sendMessage = async () => {
     const userText = draft.trim();
@@ -362,7 +386,7 @@ export default function LangflowWidget() {
         <Paper
           elevation={18}
           sx={{
-            width: { xs: "calc(100vw - 24px)", sm: 420 },
+            width: { xs: "calc(100vw - 24px)", sm: hasAnyChart ? 640 : 420 },
             height: { xs: "min(74vh, 640px)", sm: 620 },
             mt: 1.5,
             borderRadius: 3,
@@ -426,8 +450,20 @@ export default function LangflowWidget() {
 
             {messages.map((item) => {
               const isUser = item.role === "user";
+              const hasGraph =
+                !isUser &&
+                item.graphOption &&
+                typeof item.graphOption === "object" &&
+                !Array.isArray(item.graphOption) &&
+                Object.keys(item.graphOption).length > 0;
               return (
-                <Stack key={item.id} direction="row" spacing={1} justifyContent={isUser ? "flex-end" : "flex-start"}>
+                <Stack
+                  key={item.id}
+                  direction="row"
+                  spacing={1}
+                  justifyContent={isUser ? "flex-end" : "flex-start"}
+                  sx={{ width: "100%" }}
+                >
                   {!isUser && (
                     <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", mt: 0.5 }}>
                       <SmartToyRoundedIcon sx={{ fontSize: 18 }} />
@@ -439,12 +475,16 @@ export default function LangflowWidget() {
                     sx={{
                       px: 1.25,
                       py: 1,
-                      maxWidth: "84%",
+                      width: hasGraph ? "auto" : undefined,
+                      flex: hasGraph ? 1 : "0 1 auto",
+                      maxWidth: hasGraph ? "none" : "84%",
+                      minWidth: 0,
                       borderRadius: 2.25,
                       border: "1px solid",
                       borderColor: isUser ? "primary.main" : "divider",
                       bgcolor: isUser ? "primary.main" : "background.paper",
                       color: isUser ? "primary.contrastText" : "text.primary",
+                      overflow: "visible",
                     }}
                   >
                     <Typography

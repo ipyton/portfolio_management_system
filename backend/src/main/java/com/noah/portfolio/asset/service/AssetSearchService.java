@@ -145,6 +145,24 @@ public class AssetSearchService {
         );
     }
 
+    public AssetWorldIndicesResponse worldIndices() {
+        List<AssetEntity> indices = assetRepository.findBenchmarkIndices();
+        if (indices.isEmpty()) {
+            indices = assetRepository.findAllByAssetTypeOrderBySymbolAsc(AssetType.INDEX);
+        }
+
+        List<AssetWorldIndexItem> items = indices.stream()
+                .map(asset -> new AssetWorldIndexItem(
+                        asset.getSymbol(),
+                        asset.getName(),
+                        asset.getRegion(),
+                        asset.getExchange(),
+                        asset.getCurrency()
+                ))
+                .toList();
+        return new AssetWorldIndicesResponse(items.size(), items);
+    }
+
     public AssetSuggestionResponse suggest(String query, Integer limit) {
         String normalizedQuery = normalizeQuery(query);
         int normalizedLimit = normalizeSuggestionLimit(limit);
@@ -289,12 +307,18 @@ public class AssetSearchService {
     @Transactional
     public AssetPriceHistoryResponse priceHistory(String query, Integer days) {
         String normalizedQuery = normalizeQuery(query);
+        String normalizedLookupQuery = normalizeHistoryLookupQuery(normalizedQuery);
         int historyDays = normalizeHistoryDays(days);
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(historyDays - 1L);
 
         List<String> warnings = new ArrayList<>();
-        AssetEntity localAsset = resolveLocalAsset(normalizedQuery);
+        if (!normalizedLookupQuery.equalsIgnoreCase(normalizedQuery)) {
+            warnings.add("Symbol " + normalizedQuery.toUpperCase(Locale.ROOT)
+                    + " is mapped to " + normalizedLookupQuery.toUpperCase(Locale.ROOT) + ".");
+        }
+
+        AssetEntity localAsset = resolveLocalAsset(normalizedLookupQuery);
         List<AssetPriceHistoryItem> localItems = List.of();
         if (localAsset != null) {
             localItems = assetPriceDailyRepository.findPriceHistory(
@@ -308,7 +332,7 @@ public class AssetSearchService {
 
         String resolvedSymbol = localAsset != null && StringUtils.hasText(localAsset.getSymbol())
                 ? localAsset.getSymbol().toUpperCase(Locale.ROOT)
-                : normalizedQuery.toUpperCase(Locale.ROOT);
+                : normalizedLookupQuery.toUpperCase(Locale.ROOT);
 
         boolean needsRefresh = localAsset != null && historyNeedsRefresh(localItems, endDate);
         if (needsRefresh) {
@@ -324,13 +348,13 @@ public class AssetSearchService {
         }
 
         if (localAsset != null && !localItems.isEmpty()) {
-            return new AssetPriceHistoryResponse(
-                    normalizedQuery,
-                    localAsset.getSymbol(),
-                    "DATABASE",
-                    localItems.size(),
-                    localItems,
-                    warnings
+                return new AssetPriceHistoryResponse(
+                        normalizedQuery,
+                        localAsset.getSymbol(),
+                        "DATABASE",
+                        localItems.size(),
+                        localItems,
+                        warnings
             );
         }
 
@@ -497,7 +521,25 @@ public class AssetSearchService {
                 return asset;
             }
         }
+        // For symbol-like queries, avoid fuzzy fallback to unrelated assets.
+        if (looksLikeSymbol(query)) {
+            return null;
+        }
         return matches.get(0);
+    }
+
+    private String normalizeHistoryLookupQuery(String query) {
+        String upper = query.trim().toUpperCase(Locale.ROOT);
+        if ("SSEC".equals(upper) || "000001.SS".equals(upper) || "SHCOMP".equals(upper) || "SH000001".equals(upper)) {
+            return "000001.SH";
+        }
+        return upper;
+    }
+
+    private boolean looksLikeSymbol(String query) {
+        String upper = query.trim().toUpperCase(Locale.ROOT);
+        return upper.startsWith("^")
+                || upper.matches("^[A-Z0-9]{1,12}(\\.[A-Z0-9]{1,6})?$");
     }
 
     private int normalizeRecommendationLimit(Integer limit) {

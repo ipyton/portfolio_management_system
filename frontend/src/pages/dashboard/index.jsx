@@ -101,8 +101,6 @@ const LIVE_DASHBOARD_API = import.meta.env.VITE_DASHBOARD_LIVE_API
   || `/api/portfolio/dashboard?baseCurrency=CNY&userId=${DEFAULT_USER_ID}`;
 const LIVE_POLLING_MS = 15000;
 
-const BENCH_POINTS = [100, 103.2, 101.8, 107.4, 109.1, 106.3, 112.6, 115.4, 113.2, 118.7, 120.1, 118.4];
-const BENCHMARK_POINTS = [100, 101.4, 100.2, 104.6, 105.8, 103.1, 107.4, 109.8, 108.3, 112.1, 114.5, 115.2];
 const SPARK_POINTS = [0, 2140, 4870, 3620, 6310, 5480, 7920, 9250, 8100, 10640, 11380, 10820, 12480];
 const DEFAULT_DONUT_SEGMENTS = [
   { label: "Tech", pct: 31, color: "#4f7bff" },
@@ -166,18 +164,103 @@ function formatTradeFeedItem(trade) {
   return `${symbol} ${side} ${quantity.toFixed(2)} @ ${price.toFixed(2)}`;
 }
 
+function formatNewsTimestamp(item) {
+  const raw = item?.publishedAt
+    ?? item?.published_at
+    ?? item?.timestamp
+    ?? item?.datetime
+    ?? item?.time
+    ?? item?.createdAt;
+  if (raw == null || raw === "") {
+    return "";
+  }
+
+  let date = null;
+  if (typeof raw === "number") {
+    const millis = raw > 1e12 ? raw : raw * 1000;
+    date = new Date(millis);
+  } else {
+    date = new Date(String(raw));
+  }
+
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
 function formatNewsFeedItem(item) {
   const headline = String(item?.headline || "").trim();
   if (!headline) {
     return null;
   }
   const source = String(item?.source || "").trim();
+  const timestamp = formatNewsTimestamp(item);
+  if (timestamp && source) {
+    return `[${timestamp}] [${source}] ${headline}`;
+  }
+  if (timestamp) {
+    return `[${timestamp}] ${headline}`;
+  }
   return source ? `[${source}] ${headline}` : headline;
 }
 
 function toFixed(value, digits = 2) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric.toFixed(digits) : "N/A";
+}
+
+function formatBenchmarkAxisDate(value) {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(String(value));
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${month}-${day}`;
+}
+
+function buildBenchmarkChartModel(payload) {
+  const chart = payload?.performance?.benchmarkChart || {};
+  const rawPoints = Array.isArray(chart?.points) ? chart.points : [];
+  const points = rawPoints.filter((point) =>
+    Number.isFinite(Number(point?.portfolio))
+    && Number.isFinite(Number(point?.benchmark))
+    && String(point?.date || "").trim(),
+  );
+
+  if (points.length < 2) {
+    return {
+      benchPoints: [],
+      benchmarkPoints: [],
+      benchmarkLabels: [],
+      benchmarkMeta: {
+        hasData: false,
+        symbol: chart?.symbol || null,
+        name: chart?.name || null,
+      },
+    };
+  }
+
+  return {
+    benchPoints: points.map((point) => Number(point.portfolio)),
+    benchmarkPoints: points.map((point) => Number(point.benchmark)),
+    benchmarkLabels: points.map((point) => formatBenchmarkAxisDate(point.date)),
+    benchmarkMeta: {
+      hasData: true,
+      symbol: chart?.symbol || null,
+      name: chart?.name || null,
+    },
+  };
 }
 
 function buildDonutSegments(payload) {
@@ -457,6 +540,10 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
     () => buildDonutSegments(dashboardPayload),
     [dashboardPayload],
   );
+  const benchmarkChartModel = useMemo(
+    () => buildBenchmarkChartModel(dashboardPayload),
+    [dashboardPayload],
+  );
 
   const activeCategory = useMemo(
     () => categories.find((category) => category.id === activeCategoryId) || categories[0],
@@ -645,8 +732,10 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         onNext={goToNextCategory}
         onSelectCategory={setActiveCategoryId}
         sparkPoints={SPARK_POINTS}
-        benchPoints={BENCH_POINTS}
-        benchmarkPoints={BENCHMARK_POINTS}
+        benchPoints={benchmarkChartModel.benchPoints}
+        benchmarkPoints={benchmarkChartModel.benchmarkPoints}
+        benchmarkLabels={benchmarkChartModel.benchmarkLabels}
+        benchmarkMeta={benchmarkChartModel.benchmarkMeta}
         donutSegments={donutSegments}
       />
       <div className="stock-bottom-grid">

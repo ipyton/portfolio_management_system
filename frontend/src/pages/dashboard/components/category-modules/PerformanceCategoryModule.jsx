@@ -6,7 +6,11 @@ export default function PerformanceCategoryModule({
   benchPoints,
   benchmarkPoints,
   benchmarkLabels,
+  benchmarkMeta,
 }) {
+  const benchmarkName = benchmarkMeta?.name || benchmarkMeta?.symbol || "Benchmark";
+  const hasBenchmarkChart = Boolean(benchmarkMeta?.hasData);
+
   return (
     <div className="perf-layout">
       <div className="perf-cards">
@@ -15,7 +19,9 @@ export default function PerformanceCategoryModule({
       <article className="perf-chart-panel">
         <p className="perf-chart-heading">Benchmark Comparisons</p>
         <p className="perf-chart-sub" style={{ color: category.accent }}>
-          Portfolio vs S&amp;P 500 — YTD cumulative return
+          {hasBenchmarkChart
+            ? `Portfolio vs ${benchmarkName} — Cumulative return`
+            : "No comparable benchmark data for current holdings"}
         </p>
         <BenchmarkChart
           primary={benchPoints}

@@ -71,4 +71,10 @@ public class AssetSearchController {
     ) {
         return assetSearchService.priceHistory(query, days);
     }
+
+    @GetMapping("/world-indices")
+    @Operation(summary = "List world indices", description = "Returns world indices configured in local assets table.")
+    public AssetWorldIndicesResponse worldIndices() {
+        return assetSearchService.worldIndices();
+    }
 }

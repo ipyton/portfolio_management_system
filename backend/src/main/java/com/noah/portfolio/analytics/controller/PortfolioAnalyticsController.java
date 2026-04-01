@@ -57,8 +57,8 @@ public class PortfolioAnalyticsController {
 
     @PostMapping("/analysis/wiener-simulation")
     @Operation(
-            summary = "Run correlated Wiener process simulation",
-            description = "Simulates multi-asset GBM paths with correlation via Cholesky decomposition and returns portfolio path statistics."
+            summary = "Run correlated Student-t process simulation",
+            description = "Simulates multi-asset GBM paths with correlation via Cholesky decomposition and standardized Student-t shocks, then returns portfolio path statistics."
     )
     public WienerSimulationResponse simulateWienerProcess(
             @Valid @RequestBody WienerSimulationRequest request

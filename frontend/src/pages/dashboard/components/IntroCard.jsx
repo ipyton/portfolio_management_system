@@ -18,7 +18,6 @@ export default function IntroCard({ meta, activityFeed, isLoggedIn, status, scro
           <p className="hero-copy">{meta.description}</p>
         </div>
         <div className="hero-status-card">
-          <span>Ops Status</span>
           <strong>{statusHeading}</strong>
           <p>{statusMessage}</p>
         </div>

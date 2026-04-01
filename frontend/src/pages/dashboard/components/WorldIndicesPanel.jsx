@@ -2,18 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../../lib/api";
 
 const PAGE_SIZE = 5;
-const ROTATE_INTERVAL_MS = 30000;
+const ROTATE_INTERVAL_MS = 5000;
+const PROGRESS_TICK_MS = 120;
 const LOOKBACK_DAYS = 30;
 const REQUEST_TIMEOUT_MS = 8000;
-const AUTO_REFRESH_INTERVAL_MS = Math.max(
-  15000,
-  Number(import.meta.env.VITE_WORLD_INDICES_REFRESH_MS || 90000),
-);
-
-const WORLD_INDICES = [
+const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_WORLD_INDICES = [
   { symbol: "SPX", name: "S&P 500", region: "US" },
   { symbol: "IXIC", name: "NASDAQ Composite", region: "US" },
   { symbol: "DJI", name: "Dow Jones", region: "US" },
+  { symbol: "RUT", name: "Russell 2000", region: "US" },
+  { symbol: "VIX", name: "CBOE Volatility Index", region: "US" },
   { symbol: "FTSE", name: "FTSE 100", region: "UK" },
   { symbol: "GDAXI", name: "DAX", region: "DE" },
   { symbol: "FCHI", name: "CAC 40", region: "FR" },
@@ -26,6 +25,9 @@ const WORLD_INDICES = [
   { symbol: "AXJO", name: "S&P/ASX 200", region: "AU" },
   { symbol: "KS11", name: "KOSPI", region: "KR" },
   { symbol: "TSX", name: "S&P/TSX Composite", region: "CA" },
+  { symbol: "STI", name: "Straits Times", region: "SG" },
+  { symbol: "TWII", name: "TAIEX", region: "TW" },
+  { symbol: "IBOV", name: "Ibovespa", region: "BR" },
 ];
 
 function buildEmptySnapshot(indexItem) {
@@ -37,6 +39,7 @@ function buildEmptySnapshot(indexItem) {
     sparkline: [],
     available: false,
     warnings: [],
+    refreshedAt: null,
   };
 }
 
@@ -68,6 +71,13 @@ function formatChange(change, changePct) {
     return "N/A";
   }
   return `${formatSignedNumber(change)} (${formatSignedNumber(changePct, 2)}%)`;
+}
+
+function formatRefreshTime(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    return "Not refreshed yet";
+  }
+  return `Refreshed ${value.toLocaleTimeString()}`;
 }
 
 function toSparklinePolyline(points) {
@@ -111,7 +121,37 @@ async function fetchWithTimeout(path, timeoutMs = REQUEST_TIMEOUT_MS) {
   }
 }
 
+function normalizeIndexItem(raw) {
+  const symbol = typeof raw?.symbol === "string" ? raw.symbol.trim().toUpperCase() : "";
+  if (!symbol) {
+    return null;
+  }
+
+  const name = typeof raw?.name === "string" && raw.name.trim()
+    ? raw.name.trim()
+    : symbol;
+  const region = typeof raw?.region === "string" && raw.region.trim()
+    ? raw.region.trim().toUpperCase()
+    : "N/A";
+
+  return { symbol, name, region };
+}
+
+function mergeWithDefaultIndices(configuredItems) {
+  const merged = new Map();
+  DEFAULT_WORLD_INDICES.forEach((item) => merged.set(item.symbol, item));
+  configuredItems.forEach((item) => {
+    if (!item?.symbol) {
+      return;
+    }
+    const base = merged.get(item.symbol);
+    merged.set(item.symbol, base ? { ...base, ...item } : item);
+  });
+  return Array.from(merged.values());
+}
+
 async function fetchIndexSnapshot(indexItem) {
+  const refreshedAt = new Date();
   try {
     const payload = await fetchWithTimeout(
       `/api/assets/price-history?query=${encodeURIComponent(indexItem.symbol)}&days=${LOOKBACK_DAYS}`,
@@ -139,33 +179,47 @@ async function fetchIndexSnapshot(indexItem) {
       sparkline: closes.slice(-20),
       available: closes.length > 0,
       warnings,
+      refreshedAt,
     };
   } catch (error) {
     return {
       ...buildEmptySnapshot(indexItem),
       warnings: [error instanceof Error ? error.message : "Request failed."],
+      refreshedAt,
     };
   }
 }
 
 export default function WorldIndicesPanel() {
-  const [rows, setRows] = useState(() => WORLD_INDICES.map((item) => buildEmptySnapshot(item)));
+  const [indexItems, setIndexItems] = useState([]);
+  const [rows, setRows] = useState([]);
   const [pageIndex, setPageIndex] = useState(0);
+  const [pageProgress, setPageProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [updatedAt, setUpdatedAt] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const refreshInFlightRef = useRef(false);
-  const nextAutoPageRef = useRef(1);
+  const indexItemsRef = useRef([]);
+
+  useEffect(() => {
+    indexItemsRef.current = indexItems;
+  }, [indexItems]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(WORLD_INDICES.length / PAGE_SIZE)),
-    [],
+    () => Math.max(1, Math.ceil(indexItems.length / PAGE_SIZE)),
+    [indexItems.length],
+  );
+
+  const rowBySymbol = useMemo(
+    () => new Map(rows.map((item) => [item.symbol, item])),
+    [rows],
   );
 
   const pageRows = useMemo(() => {
     const start = pageIndex * PAGE_SIZE;
-    return rows.slice(start, start + PAGE_SIZE);
-  }, [rows, pageIndex]);
+    return indexItems
+      .slice(start, start + PAGE_SIZE)
+      .map((item) => rowBySymbol.get(item.symbol) || buildEmptySnapshot(item));
+  }, [indexItems, pageIndex, rowBySymbol]);
 
   const refreshData = useCallback(async (targetItems, options = {}) => {
     if (refreshInFlightRef.current) {
@@ -180,6 +234,10 @@ export default function WorldIndicesPanel() {
     setErrorMessage("");
 
     try {
+      if (!Array.isArray(targetItems) || targetItems.length === 0) {
+        return;
+      }
+
       const settled = await Promise.allSettled(targetItems.map((item) => fetchIndexSnapshot(item)));
       const snapshots = settled.map((result, index) => (
         result.status === "fulfilled"
@@ -190,7 +248,6 @@ export default function WorldIndicesPanel() {
         const updatesBySymbol = new Map(snapshots.map((item) => [item.symbol, item]));
         return current.map((item) => updatesBySymbol.get(item.symbol) || item);
       });
-      setUpdatedAt(new Date());
 
       if (snapshots.every((item) => !item.available)) {
         const warning = snapshots
@@ -208,9 +265,48 @@ export default function WorldIndicesPanel() {
     }
   }, []);
 
-  useEffect(() => {
-    refreshData(WORLD_INDICES.slice(0, PAGE_SIZE), { showLoading: true });
+  const loadIndices = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const payload = await fetchWithTimeout("/api/assets/world-indices");
+      const configuredItems = Array.isArray(payload?.items)
+        ? payload.items.map(normalizeIndexItem).filter((item) => item !== null)
+        : [];
+      const items = mergeWithDefaultIndices(configuredItems);
+
+      setIndexItems(items);
+      setRows((current) => {
+        const existingBySymbol = new Map(current.map((item) => [item.symbol, item]));
+        return items.map((item) => existingBySymbol.get(item.symbol) || buildEmptySnapshot(item));
+      });
+      setPageIndex(0);
+
+      if (items.length === 0) {
+        setIsLoading(false);
+        setErrorMessage("No world indices configured in database.");
+        return;
+      }
+
+      await refreshData(items.slice(0, PAGE_SIZE), { showLoading: true });
+    } catch (error) {
+      const fallbackItems = indexItemsRef.current.length > 0
+        ? indexItemsRef.current
+        : DEFAULT_WORLD_INDICES;
+      setIndexItems(fallbackItems);
+      setRows((current) => {
+        const existingBySymbol = new Map(current.map((item) => [item.symbol, item]));
+        return fallbackItems.map((item) => existingBySymbol.get(item.symbol) || buildEmptySnapshot(item));
+      });
+      setIsLoading(false);
+      setErrorMessage("Failed to load world indices config. Showing cached/default indices.");
+    }
   }, [refreshData]);
+
+  useEffect(() => {
+    loadIndices();
+  }, [loadIndices]);
 
   useEffect(() => {
     setPageIndex((current) => {
@@ -222,35 +318,72 @@ export default function WorldIndicesPanel() {
   }, [totalPages]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setPageIndex((current) => (current + 1) % totalPages);
-    }, ROTATE_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [totalPages]);
+    if (totalPages <= 1) {
+      setPageProgress(100);
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    let hasRotated = false;
+    setPageProgress(0);
+
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const nextProgress = Math.min(100, (elapsed / ROTATE_INTERVAL_MS) * 100);
+      setPageProgress(nextProgress);
+
+      if (elapsed >= ROTATE_INTERVAL_MS && !hasRotated) {
+        hasRotated = true;
+        setPageIndex((current) => (current + 1) % totalPages);
+      }
+    }, PROGRESS_TICK_MS);
+
+    return () => window.clearInterval(timer);
+  }, [pageIndex, totalPages]);
 
   useEffect(() => {
+    if (indexItems.length === 0) {
+      return undefined;
+    }
+
+    const start = pageIndex * PAGE_SIZE;
+    const targetItems = indexItems.slice(start, start + PAGE_SIZE);
+    refreshData(targetItems);
+  }, [indexItems, pageIndex, refreshData]);
+
+  useEffect(() => {
+    if (indexItems.length === 0) {
+      return undefined;
+    }
+
     const timer = setInterval(() => {
-      const targetPage = nextAutoPageRef.current % totalPages;
-      const start = targetPage * PAGE_SIZE;
-      const targetItems = WORLD_INDICES.slice(start, start + PAGE_SIZE);
+      const start = pageIndex * PAGE_SIZE;
+      const targetItems = indexItems.slice(start, start + PAGE_SIZE);
       refreshData(targetItems);
-      nextAutoPageRef.current = (targetPage + 1) % totalPages;
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [refreshData, totalPages]);
+  }, [indexItems, pageIndex, refreshData]);
 
   const statusText = isLoading
     ? "Loading index board..."
-    : updatedAt
-      ? `Updated ${updatedAt.toLocaleTimeString()}`
-      : "No updates yet";
+    : indexItems.length === 0
+      ? "No indices configured"
+      : "Auto refresh every 1 hour";
+
+  const pageText = indexItems.length === 0 ? "0/0" : `${pageIndex + 1}/${totalPages}`;
 
   return (
     <section className="feature-card world-indices-panel">
       <div className="world-indices-head">
         <h3>World Indices</h3>
         <div className="world-indices-actions">
-          <span className="world-indices-page">Page {pageIndex + 1}/{totalPages}</span>
+          <span className="world-indices-page">Page {pageText}</span>
+          <div className="slide-progress world-indices-progress" aria-hidden="true">
+            <div
+              className="slide-progress-bar world-indices-progress-bar"
+              style={{ width: `${pageProgress}%` }}
+            />
+          </div>
         </div>
       </div>
 
@@ -274,6 +407,7 @@ export default function WorldIndicesPanel() {
                 <p className={`world-index-main-line ${tone}`}>
                   {formatPrice(item.latest)} · {formatChange(item.change, item.changePct)}
                 </p>
+                <span className="world-index-refresh-time">{formatRefreshTime(item.refreshedAt)}</span>
               </div>
               <div className="world-index-trend">
                 <Sparkline points={item.sparkline} tone={tone} />

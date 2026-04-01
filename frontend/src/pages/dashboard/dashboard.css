@@ -208,7 +208,12 @@
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1fr) 360px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.dashboard-top-grid > .hero-panel,
+.dashboard-top-grid > .world-indices-panel {
+  height: 100%;
 }
 
 .dashboard-page .hero-status-card {
@@ -375,6 +380,7 @@
   padding: 14px 14px;
   display: grid;
   gap: 10px;
+  align-content: start;
 }
 
 .world-indices-head {
@@ -405,6 +411,19 @@
   font-weight: 700;
 }
 
+.world-indices-progress {
+  width: 120px;
+  height: 6px;
+  border: 1px solid rgba(121, 168, 255, 0.22);
+  background: rgba(108, 125, 158, 0.24);
+}
+
+.world-indices-progress-bar {
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  transition: width 120ms linear;
+  box-shadow: 0 0 10px rgba(79, 123, 255, 0.35);
+}
+
 .world-indices-status-row {
   display: flex;
   justify-content: space-between;
@@ -428,6 +447,13 @@
   border-radius: 12px;
   border: 1px solid rgba(108, 125, 158, 0.16);
   background: rgba(121, 168, 255, 0.04);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.world-index-row.active {
+  border-color: rgba(79, 123, 255, 0.48);
+  background: rgba(79, 123, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(79, 123, 255, 0.2) inset;
 }
 
 .world-index-main {
@@ -446,6 +472,11 @@
 
 .world-index-main span {
   font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.world-index-refresh-time {
+  font-size: 0.68rem;
   color: var(--muted);
 }
 
@@ -492,6 +523,12 @@
 .world-index-sparkline-empty {
   font-size: 0.76rem;
   color: var(--muted);
+}
+
+.benchmark-chart-empty {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .holdings-table th,
@@ -610,6 +647,10 @@
 
   .world-indices-actions {
     justify-items: start;
+  }
+
+  .world-indices-progress {
+    width: min(180px, 70vw);
   }
 }
 

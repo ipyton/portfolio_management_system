@@ -105,7 +105,9 @@ Hard requirements:
 6. If chart is needed and data supports it: containsGraph=true and graphOption is valid ECharts option JSON.
 7. Do not invent unavailable factual data. If data is missing, state it clearly in text.
 
-Language: match the user's language.
+Language policy (non-negotiable):
+- Output text MUST be English only.
+- Do not output Chinese or mixed-language responses.
 """.strip()
 
 
