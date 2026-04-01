@@ -12,6 +12,8 @@ export default function WatchlistDetail({
   selected,
   onToggleFavourite,
   onTrade,
+  onRemove,
+  isRemoving,
 }) {
   const chartData = useMemo(() => selected?.priceHistory ?? [], [selected]);
 
@@ -66,6 +68,7 @@ export default function WatchlistDetail({
         </ResponsiveContainer>
       </div>
       <div className="stats-grid">
+        <div className="stat">Name: {selected.name || selected.symbol}</div>
         <div className="stat">Return: {selected.returnPct}</div>
         <div className="stat">Investment Horizon: {selected.horizon}</div>
         <div className="stat">Sharp Ratio: {selected.sharpe}</div>
@@ -77,6 +80,13 @@ export default function WatchlistDetail({
         </button>
         <button type="button" onClick={() => onTrade("sell")}>
           Sell
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={Boolean(isRemoving)}
+        >
+          {isRemoving ? "Removing..." : "Remove"}
         </button>
         <button
           type="button"

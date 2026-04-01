@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import LangflowWidget from "./components/langflow";
+import Topbar from "./components/topbar";
 import AnalysisPage, { analysisPageMeta } from "./pages/analysis";
 import AnalyticsPage, { analyticsPageMeta } from "./pages/analytics";
 import WatchlistPage, { watchlistPageMeta } from "./pages/watchlist";

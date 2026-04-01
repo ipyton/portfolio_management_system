@@ -6,6 +6,8 @@ import {
   formatPercent,
   formatSignedPercent,
 } from "../../lib/api";
+import "../watchlist/watchlist.css";
+import "./analysis.css";
 
 export const analysisPageMeta = {
   eyebrow: "Strategy Analysis",
@@ -1326,7 +1328,7 @@ export default function AnalysisPage({ meta }) {
 
       </section>
 
-      <section className="watchlist-shell watchlist-component analysis-shell">
+      <section className="watchlist-page watchlist-shell watchlist-component analysis-shell">
         <div className="watchlist-header">
           <div>
             <p className="eyebrow">Setup</p>
