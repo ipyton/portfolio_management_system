@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import LangflowWidget from "./components/langflow";
 import AnalyticsPage, {
   analyticsActivityFeed,
@@ -12,6 +12,7 @@ import WatchlistPage, {
   watchlistActivityFeed,
   watchlistPageMeta,
 } from "./pages/watchlist";
+import Topbar from "./components/topbar";
 
 const PAGES = {
   dashboard: {
@@ -43,55 +44,37 @@ const NAV_ITEMS = Object.entries(PAGES).map(([id, config]) => ({
 export default function App() {
   const [activePage, setActivePage] = useState("analytics");
   const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = window.localStorage.getItem("theme");
+    return savedTheme === "light" ? "light" : "dark";
+  });
 
   const pageConfig = PAGES[activePage];
   const CurrentPage = pageConfig.Component;
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
 
   return (
     <div className="app-shell">
       <div className="ambient ambient-a" />
       <div className="ambient ambient-b" />
 
-      <header className="topbar">
-        <div className="brand-lockup">
-          <img src="/logo.png" alt="HSBC logo" className="brand-logo-image" />
-          <div className="brand-copy">
-            <p className="brand-kicker">Portfolio Management System</p>
-            <strong className="brand-name">Global Markets Control Room</strong>
-          </div>
-        </div>
-
-        <div className="topbar-actions">
-          <nav className="breadcrumb-nav" aria-label="Primary">
-            {NAV_ITEMS.map((item, index) => {
-              const isActive = item.id === activePage;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`breadcrumb-link${isActive ? " active" : ""}`}
-                  onClick={() => setActivePage(item.id)}
-                  aria-current={isActive ? "page" : undefined}
-                >
-                  <span className="breadcrumb-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <button
-            type="button"
-            className={`session-pill${isLoggedIn ? "" : " offline"}`}
-            onClick={() => setIsLoggedIn((current) => !current)}
-          >
-            <span className="session-dot" />
-            {isLoggedIn ? "Logged in" : "Guest mode"}
-          </button>
-        </div>
-      </header>
+      <Topbar
+        navItems={NAV_ITEMS}
+        activePage={activePage}
+        onPageChange={setActivePage}
+        isLoggedIn={isLoggedIn}
+        onLoginToggle={() => setIsLoggedIn((current) => !current)}
+        theme={theme}
+        onThemeToggle={() =>
+          setTheme((currentTheme) =>
+            currentTheme === "dark" ? "light" : "dark",
+          )
+        }
+      />
 
       <div className="content-layer">
         <main className="layout">
@@ -103,7 +86,7 @@ export default function App() {
           />
         </main>
       </div>
-
+      
       <LangflowWidget />
     </div>
   );

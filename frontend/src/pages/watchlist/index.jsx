@@ -1,4 +1,10 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
+import TradeModals from "./components/TradeModals";
+import WatchlistDetail from "./components/WatchlistDetail";
+import WatchlistList from "./components/WatchlistList";
+import WatchlistSearch from "./components/WatchlistSearch";
+import { watchlistRows } from "./watchlistData";
+import "./watchlist.css";
 
 export const watchlistPageMeta = {
   eyebrow: "Priority Watchlist",
@@ -18,73 +24,171 @@ export const watchlistActivityFeed = [
   "Analyst note attached to Semiconductor basket",
 ];
 
-export default function WatchlistPage({
-  label,
-  meta,
-  activityFeed,
-  isLoggedIn,
-}) {
+export default function WatchlistPage() {
+  const [rows, setRows] = useState(watchlistRows);
+  const [selected, setSelected] = useState(null);
+  const [activeTab, setActiveTab] = useState("all");
+  const [showRankings, setShowRankings] = useState(false);
+  const [rankingMetric, setRankingMetric] = useState("return");
+  const [rankingOrder, setRankingOrder] = useState("desc");
+  const [rankingHorizon, setRankingHorizon] = useState("1 Month");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [tradeModal, setTradeModal] = useState({ open: false, type: null });
+  const [tradeAmount, setTradeAmount] = useState("");
+  const [tradeCashAmount, setTradeCashAmount] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+
+  const cashBalance = 125000;
+  const numericAmount = Number.parseFloat(tradeAmount || "0");
+  const isOverBalance = numericAmount > cashBalance;
+  const holdingLimit = selected?.type === "Bond"
+    ? Number(selected?.holdingCash || 0)
+    : Number(selected?.holdingShares || 0);
+  const isOverHolding = tradeModal.type === "sell" && numericAmount > holdingLimit;
+  const latestPrice =
+    selected?.priceHistory?.[selected.priceHistory.length - 1]?.price || 0;
+  const stockCashValue = selected?.holdingShares
+    ? selected.holdingShares * latestPrice
+    : 0;
+  const calculatedCash = tradeAmount ? Number(tradeAmount) * latestPrice : 0;
+
+  const filteredRows = useMemo(
+    () =>
+      rows
+        .filter((row) => {
+          if (activeTab === "holdings") return row.isHolding;
+          if (activeTab === "favourites") return row.isFavourite;
+          if (activeTab === "stocks") return row.type === "Stock";
+          if (activeTab === "bonds") return row.type === "Bond";
+          return true;
+        })
+        .filter((row) => {
+          if (!searchTerm) return true;
+          const value = `${row.symbol} ${row.type}`.toLowerCase();
+          return value.includes(searchTerm.toLowerCase());
+        }),
+    [rows, activeTab, searchTerm],
+  );
+
+  const suggestionRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (!searchTerm) return false;
+        const value = `${row.symbol} ${row.type}`.toLowerCase();
+        return value.startsWith(searchTerm.toLowerCase());
+      }),
+    [rows, searchTerm],
+  );
+
+  const horizonMap = {
+    "1 Month": 1,
+    "3 Months": 3,
+    "6 Months": 6,
+    "1 Year": 12,
+    "3 Years": 36,
+  };
+
+  const horizonFilteredRows = showRankings
+    ? filteredRows.filter((row) => row.horizonMonths === horizonMap[rankingHorizon])
+    : filteredRows;
+
+  const metricValue = (row) => {
+    if (rankingMetric === "return") return parseFloat(row.returnPct);
+    if (rankingMetric === "sharpe") return parseFloat(row.sharpe);
+    if (rankingMetric === "drawdown") return parseFloat(row.drawdown);
+    if (rankingMetric === "popularity") return row.popularity;
+    if (rankingMetric === "sales") return row.salesVolume;
+    if (rankingMetric === "horizon") return row.horizonMonths;
+    return 0;
+  };
+
+  const rankedRows = useMemo(() => {
+    if (!showRankings) return filteredRows;
+    return [...horizonFilteredRows].sort((a, b) => {
+      const delta = metricValue(a) - metricValue(b);
+      return rankingOrder === "asc" ? delta : -delta;
+    });
+  }, [showRankings, filteredRows, horizonFilteredRows, rankingOrder, rankingMetric]);
+
   return (
-    <>
-      <section className="hero-panel">
-        <p className="eyebrow">{meta.eyebrow}</p>
-        <div className="hero-heading-row">
-          <div>
-            <h1>{meta.title}</h1>
-            <p className="hero-copy">{meta.description}</p>
-          </div>
-          <div className="hero-status-card">
-            <span>Watch Mode</span>
-            <strong>
-              {isLoggedIn
-                ? "Names and triggers are in focus"
-                : "Previewing watch surface"}
-            </strong>
-            <p>
-              {isLoggedIn
-                ? "Use this lane to track event windows, liquidity conditions, and next actions."
-                : "Guest mode is helpful for layout review before connecting live datasets."}
-            </p>
-          </div>
-        </div>
+    <section className="watchlist-shell watchlist-component">
+      <header className="watchlist-header">
+        <h1 className="watchlist-title">Watch List</h1>
+        <WatchlistSearch
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          showSuggestions={showSuggestions}
+          suggestionRows={suggestionRows}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
+          onSuggestionSelect={(row) => {
+            setSearchTerm(row.symbol);
+            setSelected(row);
+            setShowSuggestions(false);
+          }}
+        />
+      </header>
 
-        <div className="hero-metrics">
-          {meta.metrics.map((metric) => (
-            <article key={metric.label} className="hero-metric">
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <p>{metric.detail}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      <div className="watchlist-grid">
+        <WatchlistList
+          rows={rankedRows}
+          selectedSymbol={selected?.symbol}
+          onSelect={setSelected}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            setSelected(null);
+          }}
+          showRankings={showRankings}
+          onToggleRankings={() => setShowRankings((prev) => !prev)}
+          rankingMetric={rankingMetric}
+          onRankingMetricChange={setRankingMetric}
+          rankingOrder={rankingOrder}
+          onRankingOrderChange={setRankingOrder}
+          rankingHorizon={rankingHorizon}
+          onRankingHorizonChange={setRankingHorizon}
+        />
+        <WatchlistDetail
+          selected={selected}
+          onToggleFavourite={(symbol) => {
+            setRows((current) =>
+              current.map((row) =>
+                row.symbol === symbol
+                  ? { ...row, isFavourite: !row.isFavourite }
+                  : row,
+              ),
+            );
+            setSelected((current) =>
+              current && current.symbol === symbol
+                ? { ...current, isFavourite: !current.isFavourite }
+                : current,
+            );
+          }}
+          onTrade={(type) => {
+            setTradeAmount("");
+            setTradeCashAmount("");
+            setTradeModal({ open: true, type });
+          }}
+        />
+      </div>
 
-      <section className="content-grid">
-        <article className="feature-card spotlight-card">
-          <p className="eyebrow">Page Module</p>
-          <h2>{label}</h2>
-          <p>
-            Watchlist content now lives under `src/pages/watchlist/index.jsx`,
-            making it easier to turn this placeholder into a real monitored
-            universe page.
-          </p>
-        </article>
-
-        <article className="feature-card">
-          <div className="card-head">
-            <span>Monitoring Feed</span>
-            <strong>{label}</strong>
-          </div>
-          <div className="activity-list">
-            {activityFeed.map((item) => (
-              <div key={item} className="activity-item">
-                <span className="activity-dot" />
-                <p>{item}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-    </>
+      <TradeModals
+        tradeModal={tradeModal}
+        setTradeModal={setTradeModal}
+        selected={selected}
+        tradeAmount={tradeAmount}
+        setTradeAmount={setTradeAmount}
+        tradeCashAmount={tradeCashAmount}
+        setTradeCashAmount={setTradeCashAmount}
+        cashBalance={cashBalance}
+        isOverBalance={isOverBalance}
+        isOverHolding={isOverHolding}
+        stockCashValue={stockCashValue}
+        calculatedCash={calculatedCash}
+        confirmation={confirmation}
+        setConfirmation={setConfirmation}
+      />
+    </section>
   );
 }
