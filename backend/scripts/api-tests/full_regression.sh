@@ -16,7 +16,7 @@ request_json "health" "GET" "/api/health" "200" "" "0"
 log_step "Stock search"
 request_json "stock_search" "GET" "/api/stocks/search?keyword=${TEST_SYMBOL}" "200"
 assert_jq '.count >= 1 and any(.items[]; .symbol == env.TEST_SYMBOL and .assetId == (env.TEST_ASSET_ID | tonumber))' \
-    "stock search should return the seeded stock asset"
+    "stock search should return the configured stock asset"
 
 log_step "Clean watchlist item if it exists"
 request_expect_one_of "watchlist_cleanup" "DELETE" "/api/watchlists/${TEST_ASSET_ID}?userId=${TEST_USER_ID}" "204,404"

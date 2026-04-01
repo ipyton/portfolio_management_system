@@ -8,15 +8,15 @@ source "${SCRIPT_DIR}/lib.sh"
 log_step "Health endpoint"
 request_json "health" "GET" "/api/health" "200" "" "0"
 
-log_step "Stock search by seeded symbol"
+log_step "Stock search by configured symbol"
 request_json "stock_search" "GET" "/api/stocks/search?keyword=${TEST_SYMBOL}" "200"
 assert_jq '.count >= 1 and any(.items[]; .symbol == env.TEST_SYMBOL)' \
-    "stock search should return the seeded stock"
+    "stock search should return the configured stock symbol"
 
 log_step "Cash balance query"
 request_json "cash_balances" "GET" "/api/cash-accounts?userId=${TEST_USER_ID}" "200"
 assert_jq '.userId == (env.TEST_USER_ID | tonumber)' \
-    "cash balance response should match the seeded user"
+    "cash balance response should match the configured user"
 
 log_step "Trade preview"
 request_json "preview_buy" "POST" "/api/trades/preview-buy" "200" \

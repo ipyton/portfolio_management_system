@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function IntroCard({ meta, activityFeed, isLoggedIn, status }) {
+export default function IntroCard({ meta, activityFeed, isLoggedIn, status, scrollActivity = false }) {
   const statusHeading = status?.heading
     || (isLoggedIn ? "Workflow oversight is active" : "Previewing board");
   const statusMessage = status?.message
@@ -33,14 +33,27 @@ export default function IntroCard({ meta, activityFeed, isLoggedIn, status }) {
         ))}
       </div>
       {Array.isArray(activityFeed) && activityFeed.length > 0 && (
-        <div className="activity-list" style={{ marginTop: 14 }}>
-          {activityFeed.slice(0, 3).map((item, index) => (
-            <div key={`${item}-${index}`} className="activity-item">
-              <span className="activity-dot" />
-              <p>{item}</p>
+        scrollActivity ? (
+          <div className="activity-list activity-list-ticker" style={{ marginTop: 14 }}>
+            <div className="activity-list-ticker-track">
+              {[...activityFeed.slice(0, 3), ...activityFeed.slice(0, 3)].map((item, index) => (
+                <div key={`${item}-${index}`} className="activity-item">
+                  <span className="activity-dot" />
+                  <p>{item}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="activity-list" style={{ marginTop: 14 }}>
+            {activityFeed.slice(0, 3).map((item, index) => (
+              <div key={`${item}-${index}`} className="activity-item">
+                <span className="activity-dot" />
+                <p>{item}</p>
+              </div>
+            ))}
+          </div>
+        )
       )}
     </section>
   );

@@ -10,6 +10,7 @@ import HoldingsTable, { HOLDING_COLUMN_OPTIONS } from "./components/HoldingsTabl
 import IntroCard from "./components/IntroCard";
 import MetricsSlider from "./components/MetricsSlider";
 import TradeList from "./components/TradeList";
+import WorldIndicesPanel from "./components/WorldIndicesPanel";
 import "./dashboard.css";
 
 export const dashboardPageMeta = {
@@ -25,9 +26,9 @@ export const dashboardPageMeta = {
 };
 
 export const dashboardActivityFeed = [
-  "Custodian file matched successfully",
-  "Two approvals are waiting on compliance review",
-  "Settlement queue shows one exception in HK",
+  "Refreshing market headlines...",
+  "Waiting for upstream news source...",
+  "News feed will appear here when ready.",
 ];
 
 const DEFAULT_CATEGORIES = [
@@ -163,6 +164,15 @@ function formatTradeFeedItem(trade) {
   const quantity = toNumber(trade?.quantity ?? trade?.shares, 0);
   const price = toNumber(trade?.price, 0);
   return `${symbol} ${side} ${quantity.toFixed(2)} @ ${price.toFixed(2)}`;
+}
+
+function formatNewsFeedItem(item) {
+  const headline = String(item?.headline || "").trim();
+  if (!headline) {
+    return null;
+  }
+  const source = String(item?.source || "").trim();
+  return source ? `[${source}] ${headline}` : headline;
 }
 
 function toFixed(value, digits = 2) {
@@ -495,6 +505,16 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
       return activityFeed;
     }
 
+    const newsFeed = Array.isArray(dashboardPayload?.news)
+      ? dashboardPayload.news
+        .map(formatNewsFeedItem)
+        .filter(Boolean)
+        .slice(0, 3)
+      : [];
+    if (newsFeed.length) {
+      return newsFeed;
+    }
+
     const warnings = Array.isArray(dashboardPayload?.meta?.warnings)
       ? dashboardPayload.meta.warnings.slice(0, 2)
       : [];
@@ -607,12 +627,16 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
 
   return (
     <div className="dashboard-page">
-      <IntroCard
-        meta={resolvedMeta}
-        activityFeed={resolvedActivityFeed}
-        isLoggedIn={isLoggedIn}
-        status={syncStatus}
-      />
+      <div className="dashboard-top-grid">
+        <IntroCard
+          meta={resolvedMeta}
+          activityFeed={resolvedActivityFeed}
+          isLoggedIn={isLoggedIn}
+          status={syncStatus}
+          scrollActivity
+        />
+        <WorldIndicesPanel />
+      </div>
       <MetricsSlider
         categories={categories}
         activeCategory={activeCategory}

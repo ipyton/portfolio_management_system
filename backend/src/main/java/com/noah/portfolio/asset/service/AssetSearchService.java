@@ -40,8 +40,12 @@ public class AssetSearchService {
     private static final int MAX_RECOMMENDATION_LIMIT = 12;
     private static final int DEFAULT_RECOMMENDATION_LOOKBACK_DAYS = 180;
     private static final int MIN_RECOMMENDATION_LOOKBACK_DAYS = 30;
+    private static final Set<String> KNOWN_INDEX_SYMBOLS = Set.of(
+            "SPX", "IXIC", "DJI", "FTSE", "GDAXI", "FCHI", "N225", "HSI", "SSEC", "BSESN", "NSEI", "AXJO", "KS11", "TSX", "000300.SH"
+    );
 
     private final AssetSearchDataRepository assetSearchDataRepository;
+    private final AssetRepository assetRepository;
     private final AssetPriceDailyRepository assetPriceDailyRepository;
     private final FinnhubClient finnhubClient;
     private final TwelveDataClient twelveDataClient;
@@ -49,12 +53,14 @@ public class AssetSearchService {
 
     public AssetSearchService(
             AssetSearchDataRepository assetSearchDataRepository,
+            AssetRepository assetRepository,
             AssetPriceDailyRepository assetPriceDailyRepository,
             FinnhubClient finnhubClient,
             TwelveDataClient twelveDataClient,
             EastmoneyClient eastmoneyClient
     ) {
         this.assetSearchDataRepository = assetSearchDataRepository;
+        this.assetRepository = assetRepository;
         this.assetPriceDailyRepository = assetPriceDailyRepository;
         this.finnhubClient = finnhubClient;
         this.twelveDataClient = twelveDataClient;
@@ -333,6 +339,29 @@ public class AssetSearchService {
         }
 
         RemoteHistory remote = fetchRemoteHistory(resolvedSymbol, startDate, endDate, warnings);
+        AssetEntity cacheAsset = resolveOrCreateCacheAsset(localAsset, resolvedSymbol, remote.items());
+        cacheRemoteHistory(cacheAsset, remote.items(), startDate, endDate);
+
+        if (cacheAsset != null && !remote.items().isEmpty()) {
+            List<AssetPriceHistoryItem> cachedItems = assetPriceDailyRepository.findPriceHistory(
+                            cacheAsset.getId(),
+                            startDate,
+                            endDate
+                    ).stream()
+                    .map(point -> new AssetPriceHistoryItem(point.tradeDate(), point.close()))
+                    .toList();
+            if (!cachedItems.isEmpty()) {
+                return new AssetPriceHistoryResponse(
+                        normalizedQuery,
+                        cacheAsset.getSymbol(),
+                        "DATABASE",
+                        cachedItems.size(),
+                        cachedItems,
+                        warnings
+                );
+            }
+        }
+
         return new AssetPriceHistoryResponse(
                 normalizedQuery,
                 resolvedSymbol,
@@ -720,16 +749,144 @@ public class AssetSearchService {
             try {
                 return new RemoteHistory("EASTMONEY", eastmoneyClient.fetchDailyHistory(symbol, startDate, endDate));
             } catch (EastmoneyClient.EastmoneyLookupException ex) {
-                warnings.add("Failed to load price history from Eastmoney.");
+                warnings.add("Failed to load price history from Eastmoney: " + sanitizeWarningMessage(ex.getMessage()));
                 return new RemoteHistory("EASTMONEY", List.of());
             }
         }
         try {
             return new RemoteHistory("TWELVE_DATA", twelveDataClient.fetchDailyHistory(symbol, startDate, endDate));
         } catch (TwelveDataClient.TwelveDataLookupException ex) {
-            warnings.add("Failed to load price history from Twelve Data.");
+            warnings.add("Failed to load price history from Twelve Data: " + sanitizeWarningMessage(ex.getMessage()));
             return new RemoteHistory("TWELVE_DATA", List.of());
         }
+    }
+
+    private AssetEntity resolveOrCreateCacheAsset(AssetEntity localAsset, String symbol, List<AssetPriceHistoryItem> remoteItems) {
+        if (localAsset != null) {
+            return localAsset;
+        }
+        if (remoteItems == null || remoteItems.isEmpty()) {
+            return null;
+        }
+
+        String normalizedSymbol = symbol == null ? null : symbol.trim().toUpperCase(Locale.ROOT);
+        if (!StringUtils.hasText(normalizedSymbol)) {
+            return null;
+        }
+
+        return assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc(normalizedSymbol)
+                .orElseGet(() -> createCacheAsset(normalizedSymbol));
+    }
+
+    private AssetEntity createCacheAsset(String symbol) {
+        AssetType assetType = inferAssetType(symbol);
+        long nextId = Math.max(assetRepository.findMaxId() == null ? 0L : assetRepository.findMaxId(), 0L) + 1L;
+        AssetEntity entity = new AssetEntity(
+                nextId,
+                symbol,
+                assetType,
+                symbol,
+                inferCurrency(symbol),
+                inferExchange(symbol),
+                inferRegion(symbol),
+                assetType == AssetType.INDEX
+        );
+        try {
+            return assetRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            return assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc(symbol).orElse(null);
+        }
+    }
+
+    private AssetType inferAssetType(String symbol) {
+        String upper = symbol.toUpperCase(Locale.ROOT);
+        if (KNOWN_INDEX_SYMBOLS.contains(upper)) {
+            return AssetType.INDEX;
+        }
+        if (upper.startsWith("^")) {
+            return AssetType.INDEX;
+        }
+        if (upper.matches("^\\d{6}(\\.(SH|SS|SZ))?$")) {
+            return AssetType.INDEX;
+        }
+        return AssetType.STOCK;
+    }
+
+    private String inferCurrency(String symbol) {
+        String upper = symbol.toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || upper.endsWith(".SZ") || "SSEC".equals(upper)) {
+            return "CNY";
+        }
+        if ("HSI".equals(upper)) {
+            return "HKD";
+        }
+        if ("N225".equals(upper)) {
+            return "JPY";
+        }
+        return "USD";
+    }
+
+    private String inferExchange(String symbol) {
+        String upper = symbol.toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || "SSEC".equals(upper)) {
+            return "SSE";
+        }
+        if (upper.endsWith(".SZ")) {
+            return "SZSE";
+        }
+        if ("HSI".equals(upper)) {
+            return "HKEX";
+        }
+        if ("N225".equals(upper)) {
+            return "TSE";
+        }
+        if ("FTSE".equals(upper)) {
+            return "LSE";
+        }
+        return "INDEX";
+    }
+
+    private String inferRegion(String symbol) {
+        String upper = symbol.toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || upper.endsWith(".SZ") || "SSEC".equals(upper) || "000300.SH".equals(upper)) {
+            return "CN";
+        }
+        if ("HSI".equals(upper)) {
+            return "HK";
+        }
+        if ("N225".equals(upper)) {
+            return "JP";
+        }
+        if ("FTSE".equals(upper)) {
+            return "UK";
+        }
+        if ("GDAXI".equals(upper)) {
+            return "DE";
+        }
+        if ("FCHI".equals(upper)) {
+            return "FR";
+        }
+        if ("AXJO".equals(upper)) {
+            return "AU";
+        }
+        if ("BSESN".equals(upper) || "NSEI".equals(upper)) {
+            return "IN";
+        }
+        if ("KS11".equals(upper)) {
+            return "KR";
+        }
+        if ("TSX".equals(upper)) {
+            return "CA";
+        }
+        return "US";
+    }
+
+    private String sanitizeWarningMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return "unknown error";
+        }
+        String trimmed = message.trim().replaceAll("\\s+", " ");
+        return trimmed.length() > 220 ? trimmed.substring(0, 220) + "..." : trimmed;
     }
 
     private void cacheRemoteHistory(

@@ -1,7 +1,10 @@
 package com.noah.portfolio.asset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -25,6 +28,8 @@ import com.noah.portfolio.asset.dto.AssetCandidate;
 import com.noah.portfolio.asset.dto.AssetRecommendationResponse;
 import com.noah.portfolio.asset.dto.AssetSearchResponse;
 import com.noah.portfolio.asset.dto.AssetSuggestionResponse;
+import com.noah.portfolio.asset.dto.AssetPriceHistoryItem;
+import com.noah.portfolio.asset.dto.AssetPriceHistoryResponse;
 import com.noah.portfolio.asset.dto.YahooFinanceDetail;
 import com.noah.portfolio.asset.dto.YahooFinanceSearchResult;
 import com.noah.portfolio.asset.entity.AssetEntity;
@@ -33,6 +38,7 @@ import com.noah.portfolio.asset.model.AssetLatestPriceSnapshot;
 import com.noah.portfolio.asset.model.AssetPriceHistoryPoint;
 import com.noah.portfolio.asset.model.AssetType;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
+import com.noah.portfolio.asset.repository.AssetRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
 import com.noah.portfolio.asset.service.AssetSearchService;
 
@@ -68,6 +74,7 @@ class AssetSearchServiceTest {
         StubFinnhubClient finnhubClient = new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of());
         AssetSearchService service = new AssetSearchService(
                 repository,
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
                 mock(TwelveDataClient.class),
@@ -123,6 +130,7 @@ class AssetSearchServiceTest {
         StubFinnhubClient finnhubClient = new StubFinnhubClient(Optional.empty(), Optional.of(yahooFinanceDetail), List.of());
         AssetSearchService service = new AssetSearchService(
                 repository,
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
                 mock(TwelveDataClient.class),
@@ -165,6 +173,7 @@ class AssetSearchServiceTest {
         );
         AssetSearchService service = new AssetSearchService(
                 repository,
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
                 mock(TwelveDataClient.class),
@@ -196,6 +205,7 @@ class AssetSearchServiceTest {
         );
         AssetSearchService service = new AssetSearchService(
                 repository,
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
                 mock(TwelveDataClient.class),
@@ -230,6 +240,7 @@ class AssetSearchServiceTest {
 
         AssetSearchService service = new AssetSearchService(
                 repository,
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
                 mock(TwelveDataClient.class),
@@ -255,6 +266,7 @@ class AssetSearchServiceTest {
     void recommendRejectsUnknownProfile() {
         AssetSearchService service = new AssetSearchService(
                 new StubAssetSearchDataRepository(List.of(), Map.of()),
+                mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
                 mock(TwelveDataClient.class),
@@ -265,6 +277,47 @@ class AssetSearchServiceTest {
                 ResponseStatusException.class,
                 () -> service.recommend("custom", 5, 120)
         );
+    }
+
+    @Test
+    void priceHistoryCachesRemoteDataWhenLocalAssetDoesNotExist() {
+        StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(List.of(), Map.of());
+        AssetRepository assetRepository = mock(AssetRepository.class);
+        AssetPriceDailyRepository priceRepository = mock(AssetPriceDailyRepository.class);
+        TwelveDataClient twelveDataClient = mock(TwelveDataClient.class);
+        EastmoneyClient eastmoneyClient = mock(EastmoneyClient.class);
+
+        AssetEntity cachedAsset = asset(5001L, "SPX", AssetType.INDEX, "SPX", "USD", "INDEX", "US", true);
+        when(assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc("SPX")).thenReturn(Optional.empty());
+        when(assetRepository.findMaxId()).thenReturn(5000L);
+        when(assetRepository.save(any(AssetEntity.class))).thenReturn(cachedAsset);
+
+        when(eastmoneyClient.supportsSymbol("SPX")).thenReturn(false);
+        when(twelveDataClient.fetchDailyHistory(any(), any(), any())).thenReturn(List.of(
+                new AssetPriceHistoryItem(LocalDate.of(2026, 3, 28), new BigDecimal("5700.11")),
+                new AssetPriceHistoryItem(LocalDate.of(2026, 3, 31), new BigDecimal("5758.32"))
+        ));
+
+        when(priceRepository.findTradeDates(anyLong(), any(), any())).thenReturn(List.of());
+        when(priceRepository.countOhlcColumns()).thenReturn(0L);
+        when(priceRepository.findPriceHistory(anyLong(), any(), any())).thenReturn(List.of(
+                new AssetPriceHistoryPoint(5001L, new BigDecimal("5700.11"), LocalDate.of(2026, 3, 28)),
+                new AssetPriceHistoryPoint(5001L, new BigDecimal("5758.32"), LocalDate.of(2026, 3, 31))
+        ));
+
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                assetRepository,
+                priceRepository,
+                new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                twelveDataClient,
+                eastmoneyClient
+        );
+
+        AssetPriceHistoryResponse response = service.priceHistory("SPX", 30);
+
+        assertThat(response.source()).isEqualTo("DATABASE");
+        assertThat(response.count()).isGreaterThanOrEqualTo(1);
     }
 
     private AssetEntity asset(
