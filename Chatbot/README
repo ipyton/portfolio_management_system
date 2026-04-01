@@ -1,0 +1,121 @@
+请写一个Python代码来实现后端接口，传入用户提示词，然后返回一个回应
+
+我们整个这个流程是，用户提供的提示词和系统提示词一起传给LLM，LLM来判断两件事：这个问题需不需要连接数据库？这个问题需不需要连接网页搜索？这个问题需不需要搜索https://twelvedata.com/docs/fundamentals/logo 这个网站？所以我希望LLM可以返回三个布尔值，然后通过这三个独立的布尔判断来判断是否要用到数据库/网页/指定网站 。然后将数据库信息和网页信息再次给到LLM，LLM通过这些信息给出一个输出。如果输出需要图片，则用echart实现展现图片。
+
+请构建一个两阶段的 AI 分析工作流。
+
+第一阶段：规划型 LLM（Planner LLM）
+1. 输入为：用户提示词（user prompt）和系统提示词（system prompt）。
+2. 第一个 LLM 的职责不是直接回答用户问题，而是负责判断和规划本次问题需要使用哪些信息源。
+3.会从mysql表中读取当前用户之前的对话和请求，和当前的业务schema（待会补充），填充到上下文
+4. 它需要判断以下几件事：
+- 是否需要访问数据库
+- 是否需要进行Google搜索
+- 是否需要使用 Twelve Data 的搜索功能获取相关文档或信息
+4. 第一个 LLM 还需要输出后续调用所需的结构化参数。
+5. 第一个 LLM 必须输出结构化结果，不能输出自由文本描述。
+
+建议输出格式如下：
+{
+"need_database": true,
+"need_web_search": false,
+"need_twelvedata_search": true,
+"database_query_type": "portfolio_summary",
+"web_search_query": "",
+"twelvedata_query": "fundamentals logo endpoint",
+"analysis_goal": "基于可获取的数据和外部信息，回答用户关于股票基本面/持仓/金融概念的问题",
+"need_chart": false,
+"chart_type": ""
+}
+
+字段说明：
+- need_database：是否需要查询内部数据库
+- need_web_search：是否需要执行通用网页搜索
+- need_twelvedata_search：是否需要使用 Twelve Data 的搜索功能
+- database_query_type：数据库查询类型，不直接输出任意 SQL，尽量使用受控的查询类型
+- web_search_query：网页搜索关键词
+- twelvedata_query：用于 Twelve Data 搜索的关键词
+- twelvedata_path:搜索twelve的metrics路径
+- analysis_goal：提供给第二个 LLM 的分析目标
+- need_chart：是否需要图表
+- chart_type：图表类型，例如 line、bar、pie 等
+
+第二阶段：工具调用层
+1. 系统根据第一个 LLM 输出的结构化结果，按需调用对应工具。
+2. 根据need_database，need_web_search，need_twelvedata_search 独立判断：
+- 如果 need_database 为 true，则调用Mysql数据库，获得后续分析所需要的数据
+- 如果 need_web_search 为 true，则调用网页搜索工具
+- 如果 need_twelvedata_search 为 true，则调用 Twelve Data 的搜索功能
+3. 这些工具调用彼此独立，可以按需组合执行。
+4. Twelve Data 相关逻辑不要在命中时抓取整个网站内容，而是仅通过 Twelve Data 搜索功能查找与当前问题最相关的信息。
+
+第三阶段：回答型 LLM（Answer LLM）
+1. 第二个 LLM 负责生成最终回答。
+2. 第二个 LLM 的输入应包括：
+- 用户原始问题
+- 第一个 LLM 的规划结果
+- 数据库返回结果（如果有）
+- 网页搜索结果（如果有）
+- Twelve Data 搜索结果（如果有）
+3. 第二个 LLM 需要基于这些信息，并结合 analysis_goal，生成最终分析结论。
+4. 第二个 LLM 的职责是：
+- 综合分析信息
+- 给出清晰、准确、面向用户的回答
+- 在必要时解释指标、接口、数据或网页信息之间的关系
+
+第四阶段：图表输出
+1. 如果需要图表，不要让 LLM 直接生成图片文件。
+2. 第二个 LLM 应输出结构化的图表配置或图表数据。
+3. 前端根据这些结构化数据，使用 ECharts 渲染图表。
+4. 图表输出应与文字分析一起返回。
+
+实现要求
+1. 第一个 LLM 负责“判断怎么处理”，第二个 LLM 负责“基于结果生成回答”。
+2. 工具调用要模块化，不要把所有逻辑写死在一个大分支判断里。
+3. LLM只允许进行查操作，不允许进行其他更改
+5. Twelve Data 相关逻辑应采用“按需搜索”的方式。
+6. 图表输出使用echarts兼容的json，由前端负责展示，如果用户的问题及上下文不合适可视化，可以只返回TEXT结果。
+调用的返回结果举例：{
+"containsGraph": true,
+"graphOption": {
+"type": "bar", 
+"title": "月度销售数据",
+"xAxis": ["一月", "二月", "三月", "四月"],
+"yAxis": [120, 200, 150, 80],
+"color": "#4caf50",
+"legend": ["销售额"]
+},
+"text": “根据苹果公司的历史数据，该公司的盈利状态有较大波动，建议观察”
+}
+
+---
+
+当前实现补充说明（chatbot_service）
+1. 已实现分段 SSE 事件流：
+- planner_started
+- planner_done
+- tools_done
+- answer_started
+- answer_done
+- done
+
+2. 已实现 Planner 结果结构化校验：
+- 使用 Pydantic Plan 模型对 planner 输出进行字段级约束和默认值补齐。
+
+3. 已实现 Twelve Data 按 path 路由：
+- 当 planner 给出 twelvedata_path 时，请求会路由到 https://api.twelvedata.com/{path}。
+- 不再固定只调用 /search。
+
+4. 已实现统一工具错误返回结构：
+- web/twelvedata/database 都返回 success/error/data 结构，避免异常中断回答链路。
+
+5. 运行方式：
+- 在 Chatbot/chatbot_service 下安装依赖：pip install -r requirements.txt
+- 在项目根目录 Chatbot/.env 中配置数据库和 API Key
+- 启动：uvicorn chatbot_service.main:app --reload --host 0.0.0.0 --port 8000
+
+6. 接口：
+- POST /chat
+	- 请求体：{"prompt":"...","user_id":1,"system":"..."}
+	- 返回：text/event-stream（SSE）
+- GET /health

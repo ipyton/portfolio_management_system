@@ -1,0 +1,322 @@
+create table portfolio.assets
+(
+    id           bigint unsigned auto_increment
+        primary key,
+    symbol       varchar(30)                                                         not null,
+    asset_type   enum ('STOCK', 'ETF', 'FUND', 'FUTURES', 'CRYPTO', 'BOND', 'INDEX') not null,
+    name         varchar(100)                                                        not null,
+    currency     varchar(10)                                                         not null,
+    exchange     varchar(20)                                                         null,
+    region       varchar(50)                                                         null comment '地区，如 CN / US / HK',
+    is_benchmark tinyint(1) default 0                                                not null comment '是否为基准指数',
+    created_at   timestamp  default CURRENT_TIMESTAMP                                not null,
+    updated_at   timestamp  default CURRENT_TIMESTAMP                                not null on update CURRENT_TIMESTAMP,
+    constraint uq_symbol_type_exchange
+        unique (symbol, asset_type, exchange)
+);
+create table portfolio.asset_bond_detail
+(
+    asset_id      bigint unsigned                               not null
+        primary key,
+    issuer        varchar(100)                                  not null comment '发行方',
+    bond_type     enum ('GOVERNMENT', 'CORPORATE', 'MUNICIPAL') not null,
+    face_value    decimal(18, 6)                                not null comment '面值',
+    coupon_rate   decimal(6, 4)                                 not null comment '票面利率',
+    maturity_date date                                          not null comment '到期日',
+    constraint fk_bond_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.asset_crypto_detail
+(
+    asset_id         bigint unsigned not null
+        primary key,
+    chain            varchar(50)     null comment '所属公链，如 Ethereum / Solana',
+    contract_address varchar(100)    null comment '合约地址，原生币为 NULL',
+    coingecko_id     varchar(100)    null comment '用于拉取行情的第三方 ID',
+    constraint fk_crypto_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.asset_etf_detail
+(
+    asset_id      bigint unsigned not null
+        primary key,
+    fund_family   varchar(50)     null comment '发行商，如 Vanguard / BlackRock',
+    expense_ratio decimal(6, 4)   null comment '管理费率',
+    benchmark     varchar(100)    null comment '追踪指数',
+    constraint fk_etf_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.asset_fund_detail
+(
+    asset_id      bigint unsigned                                  not null
+        primary key,
+    fund_family   varchar(50)                                      null,
+    fund_type     enum ('MONEY_MARKET', 'BOND', 'EQUITY', 'MIXED') not null,
+    expense_ratio decimal(6, 4)                                    null comment '管理费率',
+    nav           decimal(18, 6)                                   null comment '最新净值',
+    constraint fk_fund_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.asset_futures_detail
+(
+    asset_id      bigint unsigned not null
+        primary key,
+    underlying    varchar(50)     not null comment '标的资产，如 Gold / Crude Oil',
+    expiry_date   date            not null comment '到期日',
+    contract_size decimal(18, 6)  not null comment '合约乘数',
+    margin_rate   decimal(6, 4)   null comment '保证金比例',
+    constraint fk_futures_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.asset_price_daily
+(
+    id         bigint unsigned auto_increment
+        primary key,
+    asset_id   bigint unsigned not null,
+    trade_date date            not null,
+    open       decimal(18, 6)  not null,
+    high       decimal(18, 6)  not null,
+    low        decimal(18, 6)  not null,
+    close      decimal(18, 6)  not null,
+    volume     bigint unsigned null,
+    constraint uq_asset_date
+        unique (asset_id, trade_date),
+    constraint fk_price_asset
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create index idx_asset_id
+    on portfolio.asset_price_daily (asset_id);
+create index idx_trade_date
+    on portfolio.asset_price_daily (trade_date);
+create table portfolio.asset_stock_detail
+(
+    asset_id   bigint unsigned not null
+        primary key,
+    sector     varchar(50)     null comment '板块',
+    industry   varchar(50)     null comment '行业',
+    market_cap bigint unsigned null comment '市值',
+    pe_ratio   decimal(10, 2)  null comment '市盈率',
+    constraint fk_stock_detail
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade
+);
+create table portfolio.fx_rate_history
+(
+    id             bigint unsigned auto_increment
+        primary key,
+    base_currency  varchar(10)    not null,
+    quote_currency varchar(10)    not null,
+    rate           decimal(18, 8) not null,
+    source         varchar(50)    not null,
+    symbol         varchar(50)    null,
+    as_of          timestamp      not null,
+    constraint uq_fx_history_pair_as_of
+        unique (base_currency, quote_currency, as_of)
+);
+create table portfolio.fx_rate_latest
+(
+    id             bigint unsigned auto_increment
+        primary key,
+    base_currency  varchar(10)    not null,
+    quote_currency varchar(10)    not null,
+    rate           decimal(18, 8) not null,
+    source         varchar(50)    not null,
+    symbol         varchar(50)    null,
+    as_of          timestamp      not null,
+    constraint uq_fx_latest_pair
+        unique (base_currency, quote_currency)
+);
+create index idx_fx_latest_as_of
+    on portfolio.fx_rate_latest (as_of);
+create table portfolio.system_config
+(
+    id          bigint unsigned auto_increment
+        primary key,
+    config_key  varchar(100)                        not null comment '如 risk_free_rate_USD',
+    config_val  varchar(255)                        not null,
+    description varchar(255)                        null,
+    updated_at  timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint config_key
+        unique (config_key)
+);
+create table portfolio.users
+(
+    id            bigint unsigned auto_increment
+        primary key,
+    username      varchar(50)                         not null,
+    email         varchar(100)                        not null,
+    password_hash varchar(255)                        not null,
+    created_at    timestamp default CURRENT_TIMESTAMP not null,
+    updated_at    timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint email
+        unique (email),
+    constraint username
+        unique (username)
+);
+create table portfolio.cash_accounts
+(
+    id                bigint unsigned auto_increment
+        primary key,
+    user_id           bigint unsigned                          not null,
+    currency          varchar(10)                              not null,
+    balance           decimal(18, 6) default 0.000000          not null comment '当前余额',
+    updated_at        timestamp      default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    available_balance decimal(18, 6)                           not null,
+    frozen_balance    decimal(18, 6)                           not null,
+    constraint uq_user_currency
+        unique (user_id, currency),
+    constraint fk_cash_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+create table portfolio.cash_transactions
+(
+    id                      bigint unsigned auto_increment
+        primary key,
+    user_id                 bigint unsigned                                                not null,
+    currency                varchar(10)                                                    not null,
+    tx_type                 enum ('DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'FEE', 'DIVIDEND') not null,
+    amount                  decimal(18, 6)                                                 not null comment '正数=入账，负数=扣款',
+    balance_after           decimal(18, 6)                                                 not null comment '交易后余额',
+    ref_trade_id            bigint unsigned                                                null comment '关联 trade_history.id',
+    occurred_at             timestamp default CURRENT_TIMESTAMP                            not null,
+    note                    varchar(255)                                                   null,
+    available_balance_after decimal(18, 6)                                                 not null,
+    biz_id                  varchar(64)                                                    not null,
+    frozen_balance_after    decimal(18, 6)                                                 not null,
+    status                  enum ('CANCELED', 'FAILED', 'PENDING', 'SUCCESS')              not null,
+    constraint fk_cash_tx_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+create index idx_occurred_at
+    on portfolio.cash_transactions (occurred_at);
+create index idx_user_id
+    on portfolio.cash_transactions (user_id);
+create table portfolio.holdings
+(
+    id         bigint unsigned auto_increment
+        primary key,
+    user_id    bigint unsigned                          not null,
+    asset_id   bigint unsigned                          not null,
+    quantity   decimal(18, 6) default 0.000000          not null comment '持有数量',
+    avg_cost   decimal(18, 6) default 0.000000          not null comment '平均持仓成本',
+    created_at timestamp      default CURRENT_TIMESTAMP not null,
+    updated_at timestamp      default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint uq_user_asset
+        unique (user_id, asset_id),
+    constraint fk_holdings_asset
+        foreign key (asset_id) references portfolio.assets (id),
+    constraint fk_holdings_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+create table portfolio.portfolio_nav_daily
+(
+    id            bigint unsigned auto_increment
+        primary key,
+    user_id       bigint unsigned                 not null,
+    nav_date      date                            not null,
+    total_value   decimal(18, 6)                  not null comment '组合总市值（持仓市值 + 现金）',
+    holding_value decimal(18, 6)                  not null comment '持仓市值',
+    cash          decimal(18, 6) default 0.000000 not null comment '现金余额',
+    net_value     decimal(18, 6)                  not null comment '归一化净值，初始=1.0',
+    daily_return  decimal(10, 6)                  null comment '当日收益率',
+    constraint uq_user_date
+        unique (user_id, nav_date),
+    constraint fk_nav_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+create index idx_nav_date
+    on portfolio.portfolio_nav_daily (nav_date);
+create table portfolio.trade_history
+(
+    id                     bigint unsigned auto_increment
+        primary key,
+    holding_id             bigint unsigned                                   not null,
+    trade_type             enum ('BUY', 'SELL')                              not null,
+    quantity               decimal(18, 6)                                    not null comment '交易数量',
+    price                  decimal(18, 6)                                    not null comment '成交价格',
+    amount                 decimal(18, 6)                                    not null comment '成交金额 = quantity × price',
+    fee                    decimal(18, 6) default 0.000000                   not null comment '手续费',
+    traded_at              timestamp      default CURRENT_TIMESTAMP          not null,
+    note                   varchar(255)                                      null,
+    biz_id                 varchar(64)                                       not null,
+    holding_avg_cost_after decimal(18, 6)                                    not null,
+    holding_quantity_after decimal(18, 6)                                    not null,
+    status                 enum ('CANCELED', 'FAILED', 'PENDING', 'SUCCESS') not null,
+    constraint fk_history_holding
+        foreign key (holding_id) references portfolio.holdings (id)
+            on delete cascade
+);
+create index idx_holding_id
+    on portfolio.trade_history (holding_id);
+create index idx_traded_at
+    on portfolio.trade_history (traded_at);
+create table portfolio.watchlist
+(
+    id       bigint unsigned auto_increment
+        primary key,
+    user_id  bigint unsigned                     not null,
+    asset_id bigint unsigned                     not null,
+    added_at timestamp default CURRENT_TIMESTAMP not null,
+    note     varchar(255)                        null,
+    constraint uq_watchlist_user_asset
+        unique (user_id, asset_id),
+    constraint fk_watchlist_asset
+        foreign key (asset_id) references portfolio.assets (id)
+            on delete cascade,
+    constraint fk_watchlist_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+
+-- =============================
+-- Chatbot workflow tables
+-- =============================
+
+create table portfolio.chat_history
+(
+    id             bigint unsigned auto_increment
+        primary key,
+    user_id        bigint unsigned                             not null,
+    role           enum ('system', 'user', 'assistant')       not null,
+    message        longtext                                    not null,
+    request_id     varchar(64)                                 null,
+    metadata_json  json                                        null,
+    created_at     timestamp default CURRENT_TIMESTAMP         not null,
+    constraint fk_chat_history_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+
+create index idx_chat_history_user_created
+    on portfolio.chat_history (user_id, created_at);
+
+create table portfolio.chat_tool_call_log
+(
+    id             bigint unsigned auto_increment
+        primary key,
+    request_id     varchar(64)                                 not null,
+    user_id        bigint unsigned                             not null,
+    tool_name      varchar(50)                                 not null comment 'database/web_search/twelvedata',
+    success        tinyint(1)                                  not null,
+    error_message  varchar(500)                                null,
+    input_json     json                                        null,
+    output_json    json                                        null,
+    created_at     timestamp default CURRENT_TIMESTAMP         not null,
+    constraint fk_chat_tool_log_user
+        foreign key (user_id) references portfolio.users (id)
+            on delete cascade
+);
+
+create index idx_chat_tool_log_request
+    on portfolio.chat_tool_call_log (request_id);
+
