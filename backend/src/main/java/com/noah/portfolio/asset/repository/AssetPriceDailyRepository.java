@@ -1,12 +1,7 @@
 package com.noah.portfolio.asset.repository;
 
-import com.noah.portfolio.asset.client.*;
-import com.noah.portfolio.asset.config.*;
-import com.noah.portfolio.asset.controller.*;
-import com.noah.portfolio.asset.dto.*;
-import com.noah.portfolio.asset.entity.*;
-import com.noah.portfolio.asset.model.*;
-import com.noah.portfolio.asset.service.*;
+import com.noah.portfolio.asset.entity.AssetPriceDailyEntity;
+import com.noah.portfolio.asset.model.AssetPriceHistoryPoint;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -14,10 +9,64 @@ import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface AssetPriceDailyRepository extends JpaRepository<AssetPriceDailyEntity, Long> {
+
+    @Query("""
+            select new com.noah.portfolio.asset.model.AssetPriceHistoryPoint(
+                p.asset.id,
+                p.close,
+                p.tradeDate
+            )
+            from AssetPriceDailyEntity p
+            where p.asset.id = :assetId
+                and p.tradeDate between :startDate and :endDate
+            order by p.tradeDate asc
+            """)
+    List<AssetPriceHistoryPoint> findPriceHistory(
+            @Param("assetId") Long assetId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+            select p.tradeDate
+            from AssetPriceDailyEntity p
+            where p.asset.id = :assetId
+                and p.tradeDate between :startDate and :endDate
+            """)
+    List<LocalDate> findTradeDates(
+            @Param("assetId") Long assetId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+
+    @Query(value = """
+            select count(*)
+            from information_schema.columns
+            where table_schema = database()
+                and table_name = 'asset_price_daily'
+                and column_name in ('open', 'high', 'low')
+            """, nativeQuery = true)
+    long countOhlcColumns();
+
+    @Modifying
+    @Query(value = """
+            insert into asset_price_daily (asset_id, trade_date, `open`, high, low, close, volume)
+            values (:assetId, :tradeDate, :open, :high, :low, :close, :volume)
+            """, nativeQuery = true)
+    int insertPriceWithOhlc(
+            @Param("assetId") Long assetId,
+            @Param("tradeDate") LocalDate tradeDate,
+            @Param("open") BigDecimal open,
+            @Param("high") BigDecimal high,
+            @Param("low") BigDecimal low,
+            @Param("close") BigDecimal close,
+            @Param("volume") Long volume
+    );
 
     @Query("""
             select p.asset.id as assetId, p.close as close, p.tradeDate as tradeDate

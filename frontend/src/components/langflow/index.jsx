@@ -60,7 +60,7 @@ export default function LangflowWidget() {
   if (!flowId || !hostUrl) {
     return (
       <aside className="langflow-fallback" aria-live="polite">
-        <p className="langflow-fallback-title">Langflow pending</p>
+        <p className="langflow-fallback-title">Assistant unavailable</p>
         <p>Set `VITE_LANGFLOW_FLOW_ID` and `VITE_LANGFLOW_HOST_URL` in `.env.dev`.</p>
       </aside>
     );
@@ -96,8 +96,8 @@ export default function LangflowWidget() {
           })
         : (
           <aside className="langflow-fallback" aria-live="polite">
-            <p className="langflow-fallback-title">Loading assistant</p>
-            <p>Preparing the embedded Langflow widget.</p>
+            <p className="langflow-fallback-title">Assistant loading</p>
+            <p>Connecting the embedded assistant.</p>
           </aside>
         )}
     </div>

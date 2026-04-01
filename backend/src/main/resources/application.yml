@@ -2,23 +2,30 @@ spring:
   application:
     name: portfolio-management-backend
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/portfolio_management?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
-    username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:root}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/portfolio?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:StrongRootPass123}
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     jpa:
       repositories:
         bootstrap-mode: lazy
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
-    show-sql: ${JPA_SHOW_SQL:true}
+    show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
+  sql:
+    init:
+      mode: ${SQL_INIT_MODE:always}
+      schema-locations: ${SQL_INIT_SCHEMA_LOCATIONS:classpath:schema-mysql.sql}
 server:
   port: ${SERVER_PORT:8080}
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
 security:
   request-key:
     header-name: ${REQUEST_KEY_HEADER:X-Request-Key}
@@ -62,6 +69,20 @@ yahoo-finance:
   base-url: ${YAHOO_FINANCE_BASE_URL:https://query1.finance.yahoo.com}
   timeout: ${YAHOO_FINANCE_TIMEOUT:5s}
   user-agent: ${YAHOO_FINANCE_USER_AGENT:portfolio-management-system/1.0}
+finnhub:
+  enabled: ${FINNHUB_ENABLED:true}
+  base-url: ${FINNHUB_BASE_URL:https://finnhub.io}
+  timeout: ${FINNHUB_TIMEOUT:5s}
+  api-key: ${FINNHUB_API_KEY:d75nub1r01qk56kdf63gd75nub1r01qk56kdf640}
+twelve-data:
+  enabled: ${TWELVE_DATA_ENABLED:true}
+  base-url: ${TWELVE_DATA_BASE_URL:https://api.twelvedata.com}
+  timeout: ${TWELVE_DATA_TIMEOUT:5s}
+  api-key: ${TWELVE_DATA_API_KEY:c993f88aa55f41418fc3449756880e99}
+eastmoney:
+  enabled: ${EASTMONEY_ENABLED:true}
+  base-url: ${EASTMONEY_BASE_URL:https://push2his.eastmoney.com}
+  timeout: ${EASTMONEY_TIMEOUT:5s}
 fx:
   enabled: ${FX_ENABLED:true}
   reporting-currency: ${FX_REPORTING_CURRENCY:CNY}
@@ -69,5 +90,5 @@ fx:
   stale-after: ${FX_STALE_AFTER:30m}
   tracked-currencies: ${FX_TRACKED_CURRENCIES:CNY,USD,HKD}
   symbols:
-    USD: ${FX_SYMBOL_USD:USDCNY=X}
-    HKD: ${FX_SYMBOL_HKD:HKDCNY=X}
+    USD: ${FX_SYMBOL_USD:USD/CNY}
+    HKD: ${FX_SYMBOL_HKD:HKD/CNY}

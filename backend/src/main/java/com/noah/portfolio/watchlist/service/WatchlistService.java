@@ -8,11 +8,14 @@ import com.noah.portfolio.watchlist.repository.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.noah.portfolio.asset.entity.AssetEntity;
@@ -59,9 +62,9 @@ public class WatchlistService {
 
     public WatchlistItem addToWatchlist(WatchlistRequest request) {
         UserEntity user = requireUser(request.userId());
-        AssetEntity asset = requireStockAsset(request.assetId());
+        AssetEntity asset = resolveStockAsset(request);
 
-        watchlistRepository.findByUserIdAndAssetId(request.userId(), request.assetId())
+        watchlistRepository.findByUserIdAndAssetId(request.userId(), asset.getId())
                 .ifPresent(existing -> {
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "The stock is already in the watchlist.");
                 });
@@ -88,6 +91,50 @@ public class WatchlistService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
     }
 
+    private AssetEntity resolveStockAsset(WatchlistRequest request) {
+        if (request.assetId() != null) {
+            return requireStockAsset(request.assetId());
+        }
+
+        if (!StringUtils.hasText(request.symbol())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "assetId or symbol must be provided.");
+        }
+
+        String symbol = request.symbol().trim().toUpperCase(Locale.ROOT);
+        AssetEntity existing = assetRepository
+                .findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(symbol, AssetType.STOCK)
+                .orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+
+        Long nextId = assetRepository.findMaxId() + 1L;
+        String name = limitLength(StringUtils.hasText(request.name()) ? request.name().trim() : symbol, 100);
+        String currency = limitLength(
+                StringUtils.hasText(request.currency()) ? request.currency().trim().toUpperCase(Locale.ROOT) : "USD",
+                10
+        );
+        String exchange = limitLength(StringUtils.hasText(request.exchange()) ? request.exchange().trim() : "UNKNOWN", 20);
+        String region = limitLength(StringUtils.hasText(request.region()) ? request.region().trim() : "UNKNOWN", 50);
+
+        try {
+            return assetRepository.save(new AssetEntity(
+                    nextId,
+                    symbol,
+                    AssetType.STOCK,
+                    name,
+                    currency,
+                    exchange,
+                    region,
+                    false
+            ));
+        } catch (DataIntegrityViolationException ex) {
+            return assetRepository
+                    .findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(symbol, AssetType.STOCK)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Failed to create stock asset.", ex));
+        }
+    }
+
     private AssetEntity requireStockAsset(Long assetId) {
         AssetEntity asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found."));
@@ -95,6 +142,14 @@ public class WatchlistService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only stocks can be added to the watchlist.");
         }
         return asset;
+    }
+
+    private String limitLength(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
     private WatchlistItem toItem(WatchlistEntity watchlist, AssetPriceWindowSnapshot priceWindow) {

@@ -1,3 +1,12 @@
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_USER_ID,
+  apiFetch,
+  classForDelta,
+  formatCurrency,
+  formatDate,
+  formatSignedPercent,
+} from "../../lib/api";
 import React, { useMemo, useState } from "react";
 import TradeModals from "./components/TradeModals";
 import WatchlistDetail from "./components/WatchlistDetail";
@@ -10,12 +19,8 @@ export const watchlistPageMeta = {
   eyebrow: "Priority Watchlist",
   title: "Keep conviction names close and fast to inspect.",
   description:
-    "Review strategic holdings, event-driven names, and liquidity-sensitive positions with a focused watch surface for next actions.",
-  metrics: [
-    { label: "High Conviction", value: "18", detail: "Flagged by PM team" },
-    { label: "Event Window", value: "7", detail: "Within 10 trading days" },
-    { label: "Liquidity Watch", value: "5", detail: "Needs staged execution" },
-  ],
+    "Search the asset catalog, inspect detail, and add or remove names from the watchlist.",
+  metrics: [],
 };
 
 export const watchlistActivityFeed = [
