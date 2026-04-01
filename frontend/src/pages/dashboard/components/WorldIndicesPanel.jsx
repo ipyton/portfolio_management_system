@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../../lib/api";
 
 const PAGE_SIZE = 5;
 const ROTATE_INTERVAL_MS = 30000;
 const LOOKBACK_DAYS = 30;
 const REQUEST_TIMEOUT_MS = 8000;
+const AUTO_REFRESH_INTERVAL_MS = Math.max(
+  15000,
+  Number(import.meta.env.VITE_WORLD_INDICES_REFRESH_MS || 90000),
+);
 
 const WORLD_INDICES = [
   { symbol: "SPX", name: "S&P 500", region: "US" },
@@ -23,6 +27,18 @@ const WORLD_INDICES = [
   { symbol: "KS11", name: "KOSPI", region: "KR" },
   { symbol: "TSX", name: "S&P/TSX Composite", region: "CA" },
 ];
+
+function buildEmptySnapshot(indexItem) {
+  return {
+    ...indexItem,
+    latest: null,
+    change: null,
+    changePct: null,
+    sparkline: [],
+    available: false,
+    warnings: [],
+  };
+}
 
 function toNumber(value) {
   const parsed = Number(value);
@@ -111,6 +127,9 @@ async function fetchIndexSnapshot(indexItem) {
     const changePct = Number.isFinite(change) && Number.isFinite(previous) && previous !== 0
       ? (change / previous) * 100
       : null;
+    const warnings = Array.isArray(payload?.warnings)
+      ? payload.warnings.filter((item) => typeof item === "string" && item.trim())
+      : [];
 
     return {
       ...indexItem,
@@ -119,79 +138,78 @@ async function fetchIndexSnapshot(indexItem) {
       changePct,
       sparkline: closes.slice(-20),
       available: closes.length > 0,
+      warnings,
     };
   } catch (error) {
     return {
-      ...indexItem,
-      latest: null,
-      change: null,
-      changePct: null,
-      sparkline: [],
-      available: false,
+      ...buildEmptySnapshot(indexItem),
+      warnings: [error instanceof Error ? error.message : "Request failed."],
     };
   }
 }
 
 export default function WorldIndicesPanel() {
-  const [rows, setRows] = useState([]);
+  const [rows, setRows] = useState(() => WORLD_INDICES.map((item) => buildEmptySnapshot(item)));
   const [pageIndex, setPageIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const refreshInFlightRef = useRef(false);
+  const nextAutoPageRef = useRef(1);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((rows.length || WORLD_INDICES.length) / PAGE_SIZE)),
-    [rows.length],
+    () => Math.max(1, Math.ceil(WORLD_INDICES.length / PAGE_SIZE)),
+    [],
   );
 
   const pageRows = useMemo(() => {
-    const source = rows.length ? rows : WORLD_INDICES.map((item) => ({
-      ...item,
-      latest: null,
-      change: null,
-      changePct: null,
-      sparkline: [],
-      available: false,
-    }));
     const start = pageIndex * PAGE_SIZE;
-    return source.slice(start, start + PAGE_SIZE);
+    return rows.slice(start, start + PAGE_SIZE);
   }, [rows, pageIndex]);
 
-  const refreshData = useCallback(async (manual = false) => {
-    if (manual) {
-      setIsRefreshing(true);
-    } else {
+  const refreshData = useCallback(async (targetItems, options = {}) => {
+    if (refreshInFlightRef.current) {
+      return;
+    }
+    refreshInFlightRef.current = true;
+
+    const showLoading = Boolean(options.showLoading);
+    if (showLoading) {
       setIsLoading(true);
     }
     setErrorMessage("");
 
     try {
-      const settled = await Promise.allSettled(WORLD_INDICES.map((item) => fetchIndexSnapshot(item)));
+      const settled = await Promise.allSettled(targetItems.map((item) => fetchIndexSnapshot(item)));
       const snapshots = settled.map((result, index) => (
         result.status === "fulfilled"
           ? result.value
-          : {
-            ...WORLD_INDICES[index],
-            latest: null,
-            change: null,
-            changePct: null,
-            sparkline: [],
-            available: false,
-          }
+          : buildEmptySnapshot(targetItems[index])
       ));
-      setRows(snapshots);
+      setRows((current) => {
+        const updatesBySymbol = new Map(snapshots.map((item) => [item.symbol, item]));
+        return current.map((item) => updatesBySymbol.get(item.symbol) || item);
+      });
       setUpdatedAt(new Date());
+
+      if (snapshots.every((item) => !item.available)) {
+        const warning = snapshots
+          .flatMap((item) => (Array.isArray(item.warnings) ? item.warnings : []))
+          .find((item) => typeof item === "string" && item.trim());
+        setErrorMessage(warning || "No index data was returned for this refresh.");
+      }
     } catch (error) {
       setErrorMessage("Failed to refresh global index data.");
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      refreshInFlightRef.current = false;
+      if (showLoading) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    refreshData(false);
+    refreshData(WORLD_INDICES.slice(0, PAGE_SIZE), { showLoading: true });
   }, [refreshData]);
 
   useEffect(() => {
@@ -210,6 +228,17 @@ export default function WorldIndicesPanel() {
     return () => clearInterval(timer);
   }, [totalPages]);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const targetPage = nextAutoPageRef.current % totalPages;
+      const start = targetPage * PAGE_SIZE;
+      const targetItems = WORLD_INDICES.slice(start, start + PAGE_SIZE);
+      refreshData(targetItems);
+      nextAutoPageRef.current = (targetPage + 1) % totalPages;
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [refreshData, totalPages]);
+
   const statusText = isLoading
     ? "Loading index board..."
     : updatedAt
@@ -222,14 +251,6 @@ export default function WorldIndicesPanel() {
         <h3>World Indices</h3>
         <div className="world-indices-actions">
           <span className="world-indices-page">Page {pageIndex + 1}/{totalPages}</span>
-          <button
-            type="button"
-            className="world-indices-refresh"
-            onClick={() => refreshData(true)}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? "Refreshing..." : "Refresh"}
-          </button>
         </div>
       </div>
 

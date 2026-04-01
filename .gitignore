@@ -24,3 +24,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .VSCodeCounter
+
+# Spring Boot local config
+backend/src/main/resources/application.yml
+backend/src/main/resources/application.yaml

@@ -22,22 +22,19 @@ import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import SmartToyRoundedIcon from "@mui/icons-material/SmartToyRounded";
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as echarts from "echarts";
 
-const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_MINIMAX_API_URL || "";
-const apiKey = import.meta.env.VITE_MINIMAX_API_KEY || "";
-const modelName = import.meta.env.VITE_MINIMAX_MODEL || "MiniMax-M2.5";
-const systemPrompt = import.meta.env.VITE_MINIMAX_SYSTEM_PROMPT || "";
+const apiUrl = import.meta.env.VITE_CHATBOT_API_URL || import.meta.env.VITE_API_URL || "";
+const chatUserId = Number.parseInt(import.meta.env.VITE_CHATBOT_USER_ID || "1", 10);
+const systemPrompt = import.meta.env.VITE_CHATBOT_SYSTEM_PROMPT || "你是专业投研助手。";
 const widgetTitle = "PiggyBank AI Assistant";
 
-// Define the number historical chatting messages should be considered.
-const OFFSET = 1;
-
-function createMessage(role, content = "", images = []) {
+function createMessage(role, content = "", images = [], graphOption = null) {
   const uid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
-  return { id: uid, role, content, images };
+  return { id: uid, role, content, images, graphOption };
 }
 
 function sanitizeAssistantText(input) {
@@ -56,80 +53,51 @@ function sanitizeAssistantText(input) {
   return withoutThinkingLines.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function parseContent(content) {
-  const images = [];
-  let text = "";
-
-  const pushImage = (candidate) => {
-    if (typeof candidate !== "string") return;
-    const value = candidate.trim();
-    if (!value) return;
-    images.push(value);
-  };
-
-  const pushText = (candidate) => {
-    if (typeof candidate === "string") text += candidate;
-  };
-
-  const handleNode = (item) => {
-    if (typeof item === "string") {
-      pushText(item);
-      return;
-    }
-    if (!item || typeof item !== "object") return;
-
-    if (item.type === "image_url") {
-      pushImage(item.image_url?.url || item.image_url || item.url);
-      return;
-    }
-    if (item.type === "image") {
-      pushImage(item.url || item.image_url?.url || item.image_url);
-      return;
-    }
-    if (typeof item.text === "string") {
-      pushText(item.text);
-      return;
-    }
-    if (typeof item.content === "string") {
-      pushText(item.content);
-      return;
-    }
-    if (item.image_url) {
-      pushImage(item.image_url?.url || item.image_url);
-    }
-  };
-
-  if (Array.isArray(content)) {
-    content.forEach(handleNode);
-  } else if (typeof content === "string") {
-    pushText(content);
-  } else if (content && typeof content === "object") {
-    handleNode(content);
+function parseJsonSafe(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-
-  return { text, images };
 }
 
-function extractAssistantDelta(payload) {
-  if (!payload || typeof payload !== "object") {
-    return { text: "", images: [], statusCode: null, statusMsg: "" };
-  }
+function AssistantChart({ option }) {
+  const chartRef = useRef(null);
 
-  const statusCode = payload?.base_resp?.status_code ?? null;
-  const statusMsg = payload?.base_resp?.status_msg || "";
+  useEffect(() => {
+    if (!option || typeof option !== "object" || Array.isArray(option)) return undefined;
+    if (!chartRef.current) return undefined;
 
-  const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
-  const deltaContent = parseContent(choice?.delta?.content);
-  if (deltaContent.text || deltaContent.images.length > 0) {
-    return { ...deltaContent, statusCode, statusMsg };
-  }
+    const chart = echarts.init(chartRef.current);
+    chart.setOption(option, true);
 
-  const messageContent = parseContent(choice?.message?.content);
-  if (messageContent.text || messageContent.images.length > 0) {
-    return { ...messageContent, statusCode, statusMsg };
-  }
+    const handleResize = () => {
+      chart.resize();
+    };
+    window.addEventListener("resize", handleResize);
 
-  return { ...parseContent(payload?.output_text || payload?.text || ""), statusCode, statusMsg };
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.dispose();
+    };
+  }, [option]);
+
+  if (!option || typeof option !== "object" || Array.isArray(option)) return null;
+
+  return (
+    <Box
+      ref={chartRef}
+      sx={{
+        width: "100%",
+        height: 260,
+        mt: 1,
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1.5,
+        bgcolor: "background.default",
+      }}
+    />
+  );
 }
 
 export default function LangflowWidget() {
@@ -150,8 +118,8 @@ export default function LangflowWidget() {
   }, [messages, isOpen, isStreaming]);
 
   const envMissingText = useMemo(() => {
-    if (!apiUrl) return "Missing `VITE_API_URL` or `VITE_MINIMAX_API_URL`.";
-    if (!apiKey) return "Missing `VITE_MINIMAX_API_KEY`.";
+    if (!apiUrl) return "Missing `VITE_CHATBOT_API_URL` or `VITE_API_URL`.";
+    if (Number.isNaN(chatUserId)) return "Invalid `VITE_CHATBOT_USER_ID`.";
     return "";
   }, []);
 
@@ -166,16 +134,6 @@ export default function LangflowWidget() {
 
     const userMessage = createMessage("user", userText);
     const assistantMessage = createMessage("assistant");
-    const chatHistory = [...messages, userMessage];
-    const recentTwoMessages = chatHistory.slice(-OFFSET);
-    const requestMessages = recentTwoMessages.map((item) => ({
-      role: item.role,
-      content: item.content,
-    }));
-
-    if (systemPrompt.trim()) {
-      requestMessages.unshift({ role: "system", content: systemPrompt.trim() });
-    }
 
     setDraft("");
     setError("");
@@ -184,54 +142,98 @@ export default function LangflowWidget() {
 
     let streamedText = "";
     let streamedImages = [];
+    let streamedGraphOption = null;
     let streamBuffer = "";
+    let streamError = "";
 
     const updateAssistant = () => {
       const cleanedText = sanitizeAssistantText(streamedText);
       const uniqueImages = Array.from(new Set(streamedImages));
       setMessages((current) =>
         current.map((item) =>
-          item.id === assistantMessage.id ? { ...item, content: cleanedText, images: uniqueImages } : item,
+          item.id === assistantMessage.id
+            ? { ...item, content: cleanedText, images: uniqueImages, graphOption: streamedGraphOption }
+            : item,
         ),
       );
     };
 
+    const applyAnswerPayload = (payload) => {
+      if (!payload || typeof payload !== "object") return false;
+      if (typeof payload.text !== "string") return false;
+
+      streamedText = payload.text;
+      if (
+        payload.containsGraph &&
+        payload.graphOption &&
+        typeof payload.graphOption === "object" &&
+        Object.keys(payload.graphOption).length > 0
+      ) {
+        streamedGraphOption = payload.graphOption;
+      } else {
+        streamedGraphOption = null;
+      }
+      updateAssistant();
+      return true;
+    };
+
     const processPayloadText = (payloadText) => {
       if (!payloadText || payloadText === "[DONE]") return;
-
-      let payload;
-      try {
-        payload = JSON.parse(payloadText);
-      } catch {
-        return;
+      const payload = parseJsonSafe(payloadText);
+      if (payload && applyAnswerPayload(payload)) return;
+      if (!payload && payloadText.trim()) {
+        streamedText = payloadText.trim();
+        updateAssistant();
       }
-
-      const delta = extractAssistantDelta(payload);
-      if (delta.statusCode && delta.statusCode !== 0) {
-        throw new Error(delta.statusMsg || "MiniMax service is busy. Please retry.");
-      }
-
-      if (delta.text) streamedText += delta.text;
-      if (delta.images.length > 0) streamedImages = [...streamedImages, ...delta.images];
-      updateAssistant();
     };
 
     const processStreamEvent = (rawEventText) => {
       if (!rawEventText) return;
       const lines = rawEventText.split(/\r?\n/);
-      const dataLines = lines
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim());
+      let eventName = "";
+      const dataLines = [];
 
-      if (dataLines.length === 0) {
-        const fallback = rawEventText.trim();
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+
+      const payloadText = dataLines.join("\n").trim();
+
+      if (!eventName) {
+        const fallback = payloadText || rawEventText.trim();
         if (fallback) processPayloadText(fallback);
         return;
       }
 
-      for (const line of dataLines) {
-        processPayloadText(line);
+      if (eventName === "answer_done") {
+        processPayloadText(payloadText);
+        return;
+      }
+
+      if (eventName === "answer_delta") {
+        const payload = parseJsonSafe(payloadText);
+        const delta =
+          (payload && typeof payload === "object" && typeof payload.delta === "string" && payload.delta) ||
+          payloadText;
+        if (delta) {
+          streamedText += delta;
+          updateAssistant();
+        }
+        return;
+      }
+
+      if (eventName.endsWith("_error")) {
+        const payload = parseJsonSafe(payloadText);
+        const message =
+          (payload && typeof payload === "object" && typeof payload.error === "string" && payload.error) ||
+          payloadText ||
+          eventName;
+        streamError = streamError ? `${streamError} | ${message}` : message;
+        return;
       }
     };
 
@@ -281,18 +283,17 @@ export default function LangflowWidget() {
 
     /* Generate AI Request Here! */
     try {
-      const response = await fetch(apiUrl, {
+      const requestUrl = apiUrl.endsWith("/chat") ? apiUrl : `${apiUrl.replace(/\/+$/, "")}/chat`;
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
         body: JSON.stringify({
-          model: modelName,
-          messages: requestMessages,
-          temperature: 0.1,
-          stream: true,
+          prompt: userText,
+          user_id: chatUserId,
+          system: systemPrompt.trim(),
         }),
       });
 
@@ -315,6 +316,9 @@ export default function LangflowWidget() {
         streamedText = "I received your message, but the response body was empty.";
       }
 
+      if (streamError) {
+        setError(`Assistant request failed: ${streamError}`);
+      }
       updateAssistant();
     } catch (requestError) {
       let apiErrorText = requestError?.message || "Request failed.";
@@ -324,6 +328,7 @@ export default function LangflowWidget() {
           apiErrorText =
             parsedError?.base_resp?.status_msg ||
             parsedError?.error?.message ||
+            parsedError?.detail ||
             parsedError?.message ||
             apiErrorText;
         } catch {
@@ -335,7 +340,7 @@ export default function LangflowWidget() {
       setMessages((current) =>
         current.map((item) =>
           item.id === assistantMessage.id
-            ? { ...item, content: "I could not generate a response this time.", images: [] }
+            ? { ...item, content: "I could not generate a response this time.", images: [], graphOption: null }
             : item,
         ),
       );
@@ -468,6 +473,8 @@ export default function LangflowWidget() {
                         ))}
                       </Stack>
                     )}
+
+                    {!isUser && <AssistantChart option={item.graphOption} />}
                   </Paper>
 
                   {isUser && (
@@ -523,7 +530,7 @@ export default function LangflowWidget() {
             </Stack>
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
               <Chip size="small" icon={<ImageRoundedIcon />} label="Image output enabled" variant="outlined" />
-              <Chip size="small" label="Temp 0.1" variant="outlined" />
+              <Chip size="small" label="Gemini backend" variant="outlined" />
             </Stack>
           </Box>
         </Paper>

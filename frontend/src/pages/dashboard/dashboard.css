@@ -405,22 +405,6 @@
   font-weight: 700;
 }
 
-.world-indices-refresh {
-  border: 1px solid rgba(79, 123, 255, 0.32);
-  background: rgba(79, 123, 255, 0.08);
-  color: var(--text);
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.world-indices-refresh:disabled {
-  opacity: 0.66;
-  cursor: not-allowed;
-}
-
 .world-indices-status-row {
   display: flex;
   justify-content: space-between;
