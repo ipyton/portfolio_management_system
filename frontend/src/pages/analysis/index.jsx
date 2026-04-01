@@ -875,6 +875,7 @@ export default function AnalysisPage({ meta }) {
   const [sharpeLoading, setSharpeLoading] = useState(false);
   const [sharpeError, setSharpeError] = useState("");
   const [sharpeResult, setSharpeResult] = useState(null);
+  const [activeSection, setActiveSection] = useState("backtest");
 
   const profilePreset = profile ? PROFILE_PRESETS[profile] : null;
   const basketSymbolSet = useMemo(
@@ -935,29 +936,42 @@ export default function AnalysisPage({ meta }) {
     setRecommendationLoading(true);
     setBacktestError("");
     try {
-      const responseList = await Promise.all(
-        preset.seeds.map((seed) =>
-          apiFetch(`/api/assets/suggestions?query=${encodeURIComponent(seed)}&limit=4`),
-        ),
-      );
+      let picked = [];
+      if (profile) {
+        const recommendationResponse = await apiFetch(
+          `/api/assets/recommendations?profile=${encodeURIComponent(profile)}&limit=5&lookbackDays=180`,
+        );
+        picked = (recommendationResponse.items || []).map((item) => ({
+          ...item,
+          targetWeight: Number(item.targetWeight || 0),
+        }));
+      }
 
-      const merged = [];
-      const seen = new Set();
-      responseList.forEach((response) => {
-        (response.items || []).forEach((item) => {
-          const key = (item.symbol || "").toUpperCase();
-          if (!key || seen.has(key)) {
-            return;
-          }
-          seen.add(key);
-          merged.push(item);
+      if (!picked.length) {
+        const responseList = await Promise.all(
+          preset.seeds.map((seed) =>
+            apiFetch(`/api/assets/suggestions?query=${encodeURIComponent(seed)}&limit=4`),
+          ),
+        );
+
+        const merged = [];
+        const seen = new Set();
+        responseList.forEach((response) => {
+          (response.items || []).forEach((item) => {
+            const key = (item.symbol || "").toUpperCase();
+            if (!key || seen.has(key)) {
+              return;
+            }
+            seen.add(key);
+            merged.push(item);
+          });
         });
-      });
 
-      const picked = merged.slice(0, 5).map((item, index) => ({
-        ...item,
-        targetWeight: preset.weights[index] ?? Math.max(0.1, 1 / Math.max(1, merged.length)),
-      }));
+        picked = merged.slice(0, 5).map((item, index) => ({
+          ...item,
+          targetWeight: preset.weights[index] ?? Math.max(0.1, 1 / Math.max(1, merged.length)),
+        }));
+      }
 
       setRecommendations(picked);
       setBasket((current) => {
@@ -1277,7 +1291,7 @@ export default function AnalysisPage({ meta }) {
 
   return (
     <>
-      <section className="hero-panel">
+      <section className="hero-panel analysis-hero">
         <p className="eyebrow">{meta.eyebrow}</p>
         <div className="hero-heading-row">
           <div>
@@ -1422,293 +1436,349 @@ export default function AnalysisPage({ meta }) {
                 })
               )}
             </div>
-          </section>
 
-          <section className="watchlist-panel detail-panel">
-            <div className="card-head">
-              <span>Backtest Basket</span>
-              <strong>{normalizedBasket.length} assets</strong>
-            </div>
-            <div className="analysis-actions">
-              <button
-                type="button"
-                className="search-button"
-                onClick={rebalanceEqualWeights}
-                disabled={!normalizedBasket.length}
-              >
-                Equal Weight
-              </button>
-              <button
-                type="button"
-                className="search-button"
-                onClick={clearBasket}
-                disabled={!normalizedBasket.length}
-              >
-                Clear
-              </button>
-            </div>
-
-            {!normalizedBasket.length ? (
-              <EmptyState
-                title="Basket is empty"
-                description="Add assets from the left."
-              />
-            ) : (
-              <div className="analysis-basket-list">
-                {normalizedBasket.map((item) => (
-                  <div key={item.symbol} className="analysis-basket-item">
-                    <div>
-                      <strong>{item.symbol}</strong>
-                      <p>{item.name || "Unnamed asset"}</p>
-                    </div>
-                    <div className="analysis-basket-meta">
-                      <span>{Math.round(item.weight * 100)}%</span>
-                      <button
-                        type="button"
-                        className="analysis-remove"
-                        onClick={() => removeFromBasket(item.symbol)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="analysis-controls">
-              <label>
-                Window
-                <select
-                  value={windowDays}
-                  onChange={(event) => setWindowDays(Number(event.target.value))}
-                  disabled={!normalizedBasket.length}
-                >
-                  {BACKTEST_WINDOWS.map((days) => (
-                    <option key={days} value={days}>
-                      {days} days
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="search-button"
-                onClick={runBacktest}
-                disabled={!normalizedBasket.length || backtestLoading}
-              >
-                {backtestLoading ? "Running..." : "Run Backtest"}
-              </button>
-            </div>
-
-            {backtestError ? <p className="inline-error">{backtestError}</p> : null}
-
-            {backtestResult ? (
-              <>
-                <div className="stats-grid live-stats">
-                  <div>
-                    <span>Total Return</span>
-                    <strong className={classForDelta(backtestResult.totalReturn)}>
-                      {formatSignedPercent(backtestResult.totalReturn)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Annualized Return</span>
-                    <strong className={classForDelta(backtestResult.annualizedReturn)}>
-                      {formatSignedPercent(backtestResult.annualizedReturn)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Max Drawdown</span>
-                    <strong className={classForDelta(backtestResult.maxDrawdown)}>
-                      {formatSignedPercent(backtestResult.maxDrawdown)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Last Date</span>
-                    <strong>{formatDate(backtestResult.curve[backtestResult.curve.length - 1]?.date)}</strong>
-                  </div>
-                </div>
-
-                <BacktestChart points={backtestResult.curve} />
-
-                <div className="activity-list">
-                  {(backtestResult.assetReturns || []).slice(0, 5).map((item) => (
-                    <div key={item.symbol} className="activity-item">
-                      <span className="activity-dot" />
-                      <p>
-                        {item.symbol}: {formatSignedPercent(item.totalReturn)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                title="Backtest not run"
-                description="Click Run Backtest."
-              />
-            )}
-
-            <div className="analysis-simulation">
+            <div className="analysis-basket-panel">
               <div className="card-head">
-                <span>Wiener Simulation</span>
-                <strong>{simulationResult ? `${simulationResult.paths} paths` : "Not run"}</strong>
+                <span>Basket</span>
+                <strong>{normalizedBasket.length} assets</strong>
               </div>
-
-              <div className="analysis-controls">
-                <label>
-                  Steps
-                  <select
-                    value={simulationSteps}
-                    onChange={(event) => setSimulationSteps(Number(event.target.value))}
-                    disabled={!normalizedBasket.length || simulationLoading}
-                  >
-                    {SIMULATION_STEPS.map((steps) => (
-                      <option key={steps} value={steps}>
-                        {steps} steps
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Paths
-                  <select
-                    value={simulationPaths}
-                    onChange={(event) => setSimulationPaths(Number(event.target.value))}
-                    disabled={!normalizedBasket.length || simulationLoading}
-                  >
-                    {SIMULATION_PATHS.map((paths) => (
-                      <option key={paths} value={paths}>
-                        {paths} paths
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="search-button"
-                  onClick={runWienerSimulation}
-                  disabled={!normalizedBasket.length || simulationLoading}
-                >
-                  {simulationLoading ? "Simulating..." : "Run Simulation"}
-                </button>
-              </div>
-
-              {simulationError ? <p className="inline-error">{simulationError}</p> : null}
-
-              {simulationResult ? (
-                <>
-                  <div className="stats-grid live-stats">
-                    <div>
-                      <span>Expected Return</span>
-                      <strong className={classForDelta(simulationResult.stats?.expectedReturn)}>
-                        {formatSignedPercent(simulationResult.stats?.expectedReturn)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Annualized Volatility</span>
-                      <strong>{formatPercent(simulationResult.stats?.annualizedVolatility)}</strong>
-                    </div>
-                    <div>
-                      <span>VaR 95</span>
-                      <strong className="negative">{formatLossPercent(simulationResult.stats?.var95)}</strong>
-                    </div>
-                    <div>
-                      <span>CVaR 95</span>
-                      <strong className="negative">{formatLossPercent(simulationResult.stats?.cvar95)}</strong>
-                    </div>
-                  </div>
-
-                  <SimulationChart
-                    meanPath={simulationResult.meanPath || []}
-                    samplePaths={simulationResult.samplePaths || []}
-                  />
-
-                  {simulationResult.warnings?.length ? (
-                    <div className="activity-list">
-                      {simulationResult.warnings.map((warning) => (
-                        <div key={warning} className="activity-item">
-                          <span className="activity-dot" />
-                          <p>{warning}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <EmptyState
-                  title="Simulation not run"
-                  description="Click Run Simulation."
-                />
-              )}
-            </div>
-
-            <div className="analysis-simulation">
-              <div className="card-head">
-                <span>Sharpe Optimization</span>
-                <strong>{sharpeResult ? `${NUM_RANDOM_PORTFOLIOS} portfolios` : "Not run"}</strong>
-              </div>
-
               <div className="analysis-actions">
                 <button
                   type="button"
                   className="search-button"
-                  onClick={runSharpeOptimization}
-                  disabled={!normalizedBasket.length || sharpeLoading}
+                  onClick={rebalanceEqualWeights}
+                  disabled={!normalizedBasket.length}
                 >
-                  {sharpeLoading ? "Optimizing..." : "Run Optimization"}
+                  Equal Weight
+                </button>
+                <button
+                  type="button"
+                  className="search-button"
+                  onClick={clearBasket}
+                  disabled={!normalizedBasket.length}
+                >
+                  Clear
                 </button>
               </div>
 
-              {sharpeError ? <p className="inline-error">{sharpeError}</p> : null}
-
-              {sharpeResult ? (
-                <>
-                  <div className="stats-grid live-stats">
-                    <div>
-                      <span>Expected Return</span>
-                      <strong className={classForDelta(sharpeResult.optimal.expectedReturn)}>
-                        {formatSignedPercent(sharpeResult.optimal.expectedReturn)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Volatility</span>
-                      <strong>{formatPercent(sharpeResult.optimal.volatility)}</strong>
-                    </div>
-                    <div>
-                      <span>Sharpe Ratio</span>
-                      <strong>{Number(sharpeResult.optimal.sharpeRatio).toFixed(3)}</strong>
-                    </div>
-                    <div>
-                      <span>Portfolios</span>
-                      <strong>{sharpeResult.points.length}</strong>
-                    </div>
-                  </div>
-
-                  <EfficientFrontierChart
-                    points={sharpeResult.points}
-                    optimal={sharpeResult.optimal}
-                  />
-
-                  <OptimalWeightsChart weights={sharpeResult.optimal.weights} />
-
-                  <div className="analysis-optimal-weights">
-                    {sharpeResult.optimal.weights.map((item) => (
-                      <div key={item.symbol} className="analysis-optimal-item">
-                        <strong>{item.symbol}</strong>
-                        <span>{(item.weight * 100).toFixed(1)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
+              {!normalizedBasket.length ? (
                 <EmptyState
-                  title="Optimization not run"
-                  description="Click Run Optimization."
+                  title="Basket is empty"
+                  description="Add assets from recommendations or search."
                 />
+              ) : (
+                <div className="analysis-basket-list">
+                  {normalizedBasket.map((item) => (
+                    <div key={item.symbol} className="analysis-basket-item">
+                      <div>
+                        <strong>{item.symbol}</strong>
+                        <p>{item.name || "Unnamed asset"}</p>
+                      </div>
+                      <div className="analysis-basket-meta">
+                        <span>{Math.round(item.weight * 100)}%</span>
+                        <button
+                          type="button"
+                          className="analysis-remove"
+                          onClick={() => removeFromBasket(item.symbol)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
+          </section>
+
+          <section className="watchlist-panel detail-panel">
+            <div className="card-head">
+              <span>Analysis Workspace</span>
+              <strong>{normalizedBasket.length} assets</strong>
+            </div>
+
+            <div className="analysis-stage-tabs">
+              <button
+                type="button"
+                className={`analysis-stage-tab${activeSection === "backtest" ? " active" : ""}`}
+                onClick={() => setActiveSection("backtest")}
+              >
+                <strong>Backtest</strong>
+                <span>{backtestResult ? "Done" : "Pending"}</span>
+              </button>
+              <button
+                type="button"
+                className={`analysis-stage-tab${activeSection === "simulation" ? " active" : ""}`}
+                onClick={() => setActiveSection("simulation")}
+              >
+                <strong>Wiener Simulation</strong>
+                <span>{simulationResult ? "Done" : "Pending"}</span>
+              </button>
+              <button
+                type="button"
+                className={`analysis-stage-tab${activeSection === "optimization" ? " active" : ""}`}
+                onClick={() => setActiveSection("optimization")}
+              >
+                <strong>Sharpe Optimization</strong>
+                <span>{sharpeResult ? "Done" : "Pending"}</span>
+              </button>
+            </div>
+
+            {activeSection === "backtest" ? (
+              <div className="analysis-stage-panel">
+                <div className="card-head">
+                  <span>Backtest</span>
+                  <strong>{windowDays} days</strong>
+                </div>
+
+                <div className="analysis-controls">
+                  <label>
+                    Window
+                    <select
+                      value={windowDays}
+                      onChange={(event) => setWindowDays(Number(event.target.value))}
+                      disabled={!normalizedBasket.length}
+                    >
+                      {BACKTEST_WINDOWS.map((days) => (
+                        <option key={days} value={days}>
+                          {days} days
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="search-button"
+                    onClick={runBacktest}
+                    disabled={!normalizedBasket.length || backtestLoading}
+                  >
+                    {backtestLoading ? "Running..." : "Run Backtest"}
+                  </button>
+                </div>
+
+                {backtestError ? <p className="inline-error">{backtestError}</p> : null}
+
+                {backtestResult ? (
+                  <>
+                    <div className="metric-panel">
+                      <div className="metric-panel-primary">
+                        <span className="metric-panel-label">Backtest Result</span>
+                        <strong className={classForDelta(backtestResult.totalReturn)}>
+                          {formatSignedPercent(backtestResult.totalReturn)}
+                        </strong>
+                        <p>Total Return</p>
+                      </div>
+                      <div className="metric-panel-grid">
+                        <div className="metric-panel-item">
+                          <span>Annualized Return</span>
+                          <strong className={classForDelta(backtestResult.annualizedReturn)}>
+                            {formatSignedPercent(backtestResult.annualizedReturn)}
+                          </strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>Max Drawdown</span>
+                          <strong className={classForDelta(backtestResult.maxDrawdown)}>
+                            {formatSignedPercent(backtestResult.maxDrawdown)}
+                          </strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>Last Date</span>
+                          <strong>{formatDate(backtestResult.curve[backtestResult.curve.length - 1]?.date)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <BacktestChart points={backtestResult.curve} />
+
+                    <div className="activity-list">
+                      {(backtestResult.assetReturns || []).slice(0, 5).map((item) => (
+                        <div key={item.symbol} className="activity-item">
+                          <span className="activity-dot" />
+                          <p>
+                            {item.symbol}: {formatSignedPercent(item.totalReturn)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState
+                    title="Backtest not run"
+                    description="Click Run Backtest."
+                  />
+                )}
+              </div>
+            ) : null}
+
+            {activeSection === "simulation" ? (
+              <div className="analysis-stage-panel">
+                <div className="card-head">
+                  <span>Wiener Simulation</span>
+                  <strong>{simulationResult ? `${simulationResult.paths} paths` : "Not run"}</strong>
+                </div>
+
+                <div className="analysis-controls">
+                  <label>
+                    Steps
+                    <select
+                      value={simulationSteps}
+                      onChange={(event) => setSimulationSteps(Number(event.target.value))}
+                      disabled={!normalizedBasket.length || simulationLoading}
+                    >
+                      {SIMULATION_STEPS.map((steps) => (
+                        <option key={steps} value={steps}>
+                          {steps} steps
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Paths
+                    <select
+                      value={simulationPaths}
+                      onChange={(event) => setSimulationPaths(Number(event.target.value))}
+                      disabled={!normalizedBasket.length || simulationLoading}
+                    >
+                      {SIMULATION_PATHS.map((paths) => (
+                        <option key={paths} value={paths}>
+                          {paths} paths
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="search-button"
+                    onClick={runWienerSimulation}
+                    disabled={!normalizedBasket.length || simulationLoading}
+                  >
+                    {simulationLoading ? "Simulating..." : "Run Simulation"}
+                  </button>
+                </div>
+
+                {simulationError ? <p className="inline-error">{simulationError}</p> : null}
+
+                {simulationResult ? (
+                  <>
+                    <div className="metric-panel">
+                      <div className="metric-panel-primary">
+                        <span className="metric-panel-label">Simulation Result</span>
+                        <strong className={classForDelta(simulationResult.stats?.expectedReturn)}>
+                          {formatSignedPercent(simulationResult.stats?.expectedReturn)}
+                        </strong>
+                        <p>Expected Return</p>
+                      </div>
+                      <div className="metric-panel-grid">
+                        <div className="metric-panel-item">
+                          <span>Annualized Volatility</span>
+                          <strong>{formatPercent(simulationResult.stats?.annualizedVolatility)}</strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>VaR 95</span>
+                          <strong className="negative">{formatLossPercent(simulationResult.stats?.var95)}</strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>CVaR 95</span>
+                          <strong className="negative">{formatLossPercent(simulationResult.stats?.cvar95)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <SimulationChart
+                      meanPath={simulationResult.meanPath || []}
+                      samplePaths={simulationResult.samplePaths || []}
+                    />
+
+                    {simulationResult.warnings?.length ? (
+                      <div className="activity-list">
+                        {simulationResult.warnings.map((warning) => (
+                          <div key={warning} className="activity-item">
+                            <span className="activity-dot" />
+                            <p>{warning}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <EmptyState
+                    title="Simulation not run"
+                    description="Click Run Simulation."
+                  />
+                )}
+              </div>
+            ) : null}
+
+            {activeSection === "optimization" ? (
+              <div className="analysis-stage-panel">
+                <div className="card-head">
+                  <span>Sharpe Optimization</span>
+                  <strong>{sharpeResult ? `${NUM_RANDOM_PORTFOLIOS} portfolios` : "Not run"}</strong>
+                </div>
+
+                <div className="analysis-actions">
+                  <button
+                    type="button"
+                    className="search-button"
+                    onClick={runSharpeOptimization}
+                    disabled={!normalizedBasket.length || sharpeLoading}
+                  >
+                    {sharpeLoading ? "Optimizing..." : "Run Optimization"}
+                  </button>
+                </div>
+
+                {sharpeError ? <p className="inline-error">{sharpeError}</p> : null}
+
+                {sharpeResult ? (
+                  <>
+                    <div className="metric-panel">
+                      <div className="metric-panel-primary">
+                        <span className="metric-panel-label">Optimization Result</span>
+                        <strong>{Number(sharpeResult.optimal.sharpeRatio).toFixed(3)}</strong>
+                        <p>Sharpe Ratio</p>
+                      </div>
+                      <div className="metric-panel-grid">
+                        <div className="metric-panel-item">
+                          <span>Expected Return</span>
+                          <strong className={classForDelta(sharpeResult.optimal.expectedReturn)}>
+                            {formatSignedPercent(sharpeResult.optimal.expectedReturn)}
+                          </strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>Volatility</span>
+                          <strong>{formatPercent(sharpeResult.optimal.volatility)}</strong>
+                        </div>
+                        <div className="metric-panel-item">
+                          <span>Portfolios</span>
+                          <strong>{sharpeResult.points.length}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <EfficientFrontierChart
+                      points={sharpeResult.points}
+                      optimal={sharpeResult.optimal}
+                    />
+
+                    <OptimalWeightsChart weights={sharpeResult.optimal.weights} />
+
+                    <div className="analysis-optimal-weights">
+                      {sharpeResult.optimal.weights.map((item) => (
+                        <div key={item.symbol} className="analysis-optimal-item">
+                          <strong>{item.symbol}</strong>
+                          <span>{(item.weight * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState
+                    title="Optimization not run"
+                    description="Click Run Optimization."
+                  />
+                )}
+              </div>
+            ) : null}
           </section>
         </div>
       </section>

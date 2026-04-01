@@ -14,6 +14,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.noah.portfolio.asset.client.EastmoneyClient;
@@ -21,6 +22,7 @@ import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.config.FinnhubProperties;
 import com.noah.portfolio.asset.client.TwelveDataClient;
 import com.noah.portfolio.asset.dto.AssetCandidate;
+import com.noah.portfolio.asset.dto.AssetRecommendationResponse;
 import com.noah.portfolio.asset.dto.AssetSearchResponse;
 import com.noah.portfolio.asset.dto.AssetSuggestionResponse;
 import com.noah.portfolio.asset.dto.YahooFinanceDetail;
@@ -28,6 +30,7 @@ import com.noah.portfolio.asset.dto.YahooFinanceSearchResult;
 import com.noah.portfolio.asset.entity.AssetEntity;
 import com.noah.portfolio.asset.entity.AssetStockDetailEntity;
 import com.noah.portfolio.asset.model.AssetLatestPriceSnapshot;
+import com.noah.portfolio.asset.model.AssetPriceHistoryPoint;
 import com.noah.portfolio.asset.model.AssetType;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
@@ -206,6 +209,64 @@ class AssetSearchServiceTest {
         assertThat(finnhubClient.lastSuggestionLimit).isEqualTo(3);
     }
 
+    @Test
+    void recommendReturnsScoredAndWeightedCandidates() {
+        AssetEntity spx = asset(104L, "SPX", AssetType.INDEX, "S&P 500 Index", "USD", "INDEX", "US", true);
+        AssetEntity msft = asset(102L, "MSFT", AssetType.STOCK, "Microsoft Corporation", "USD", "NASDAQ", "US", false);
+        AssetEntity nvda = asset(103L, "NVDA", AssetType.STOCK, "NVIDIA Corporation", "USD", "NASDAQ", "US", false);
+        setField(msft, "stockDetail", stockDetail("Technology", "Software", 3_000_000_000_000L, new BigDecimal("35.0")));
+        setField(nvda, "stockDetail", stockDetail("Technology", "Semiconductors", 2_800_000_000_000L, new BigDecimal("62.0")));
+
+        StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(
+                List.of(),
+                Map.of()
+        );
+        repository.recommendationCandidates = List.of(spx, msft, nvda);
+        repository.recentPriceHistory = Map.of(
+                104L, history(104L, 100, 100.5, 101.0, 101.2, 101.5),
+                102L, history(102L, 100, 102.0, 101.0, 103.0, 104.0),
+                103L, history(103L, 100, 106.0, 102.0, 110.0, 115.0)
+        );
+
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                mock(AssetPriceDailyRepository.class),
+                new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
+        );
+
+        AssetRecommendationResponse response = service.recommend("conservative", 3, 120);
+
+        assertThat(response.profile()).isEqualTo("conservative");
+        assertThat(response.count()).isEqualTo(3);
+        assertThat(response.items()).hasSize(3);
+        assertThat(response.items()).allSatisfy(item -> {
+            assertThat(item.targetWeight()).isGreaterThan(0);
+            assertThat(item.reasons()).isNotEmpty();
+        });
+        assertThat(response.items().get(0).score()).isGreaterThanOrEqualTo(response.items().get(1).score());
+        assertThat(response.items().stream().mapToDouble(item -> item.targetWeight()).sum())
+                .isCloseTo(1.0, org.assertj.core.data.Offset.offset(0.0001));
+        assertThat(response.items()).anyMatch(item -> "SPX".equals(item.symbol()));
+    }
+
+    @Test
+    void recommendRejectsUnknownProfile() {
+        AssetSearchService service = new AssetSearchService(
+                new StubAssetSearchDataRepository(List.of(), Map.of()),
+                mock(AssetPriceDailyRepository.class),
+                new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                mock(TwelveDataClient.class),
+                mock(EastmoneyClient.class)
+        );
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                ResponseStatusException.class,
+                () -> service.recommend("custom", 5, 120)
+        );
+    }
+
     private AssetEntity asset(
             Long id,
             String symbol,
@@ -242,6 +303,19 @@ class AssetSearchServiceTest {
         return detail;
     }
 
+    private List<AssetPriceHistoryPoint> history(Long assetId, double... closes) {
+        List<AssetPriceHistoryPoint> points = new ArrayList<>();
+        LocalDate start = LocalDate.of(2026, 3, 25);
+        for (int i = 0; i < closes.length; i += 1) {
+            points.add(new AssetPriceHistoryPoint(
+                    assetId,
+                    BigDecimal.valueOf(closes[i]),
+                    start.plusDays(i)
+            ));
+        }
+        return points;
+    }
+
     private <T> T newInstance(Class<T> type) {
         try {
             var constructor = type.getDeclaredConstructor();
@@ -265,6 +339,8 @@ class AssetSearchServiceTest {
     private static final class StubAssetSearchDataRepository implements AssetSearchDataRepository {
         private final List<AssetEntity> assets;
         private final Map<Long, AssetLatestPriceSnapshot> latestPriceSnapshots;
+        private List<AssetEntity> recommendationCandidates = List.of();
+        private Map<Long, List<AssetPriceHistoryPoint>> recentPriceHistory = Map.of();
         private String lastSearchQuery;
         private Integer lastSearchLimit;
 
@@ -286,6 +362,19 @@ class AssetSearchServiceTest {
         @Override
         public Map<Long, AssetLatestPriceSnapshot> findLatestPriceSnapshots(List<Long> assetIds) {
             return latestPriceSnapshots;
+        }
+
+        @Override
+        public List<AssetEntity> listRecommendationCandidates(int limit) {
+            if (recommendationCandidates.isEmpty()) {
+                return List.of();
+            }
+            return recommendationCandidates.stream().limit(limit).toList();
+        }
+
+        @Override
+        public Map<Long, List<AssetPriceHistoryPoint>> findRecentPriceHistory(List<Long> assetIds, LocalDate startDate) {
+            return recentPriceHistory;
         }
     }
 

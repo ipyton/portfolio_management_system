@@ -48,6 +48,19 @@ public class AssetSearchController {
         return assetSearchService.suggest(query, limit);
     }
 
+    @GetMapping("/recommendations")
+    @Operation(summary = "Recommend assets by risk profile", description = "Returns ranked and weighted basket candidates by profile.")
+    public AssetRecommendationResponse recommend(
+            @Parameter(description = "Risk profile: conservative, balanced, aggressive", example = "balanced")
+            @RequestParam("profile") String profile,
+            @Parameter(description = "Maximum number of recommendation items", example = "6")
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @Parameter(description = "Lookback window in days for scoring metrics", example = "180")
+            @RequestParam(name = "lookbackDays", required = false) Integer lookbackDays
+    ) {
+        return assetSearchService.recommend(profile, limit, lookbackDays);
+    }
+
     @GetMapping("/price-history")
     @Operation(summary = "Get asset price history", description = "Returns recent daily close series from database first; A-share symbols use Eastmoney, others use Twelve Data.")
     public AssetPriceHistoryResponse priceHistory(

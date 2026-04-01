@@ -8,6 +8,7 @@ import com.noah.portfolio.asset.entity.*;
 import com.noah.portfolio.asset.model.*;
 import com.noah.portfolio.asset.service.*;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -70,6 +71,36 @@ public class JpaAssetSearchDataRepository implements AssetSearchDataRepository {
             from AssetPriceDailyEntity p
             where p.asset.id in :assetIds
             order by p.asset.id asc, p.tradeDate desc
+            """;
+
+    private static final String RECOMMENDATION_CANDIDATES_JPQL = """
+            select distinct a
+            from AssetEntity a
+            left join fetch a.stockDetail sd
+            left join fetch a.etfDetail
+            left join fetch a.fundDetail
+            where a.assetType in :assetTypes
+            order by case when a.benchmark = true then 0 else 1 end,
+                case
+                    when a.assetType = com.noah.portfolio.asset.model.AssetType.INDEX then 0
+                    when a.assetType = com.noah.portfolio.asset.model.AssetType.ETF then 1
+                    when a.assetType = com.noah.portfolio.asset.model.AssetType.STOCK then 2
+                    else 3
+                end,
+                coalesce(sd.marketCap, 0) desc,
+                a.symbol asc
+            """;
+
+    private static final String RECENT_PRICE_HISTORY_JPQL = """
+            select new com.noah.portfolio.asset.model.AssetPriceHistoryPoint(
+                p.asset.id,
+                p.close,
+                p.tradeDate
+            )
+            from AssetPriceDailyEntity p
+            where p.asset.id in :assetIds
+                and p.tradeDate >= :startDate
+            order by p.asset.id asc, p.tradeDate asc
             """;
 
     @PersistenceContext
@@ -141,5 +172,40 @@ public class JpaAssetSearchDataRepository implements AssetSearchDataRepository {
             }
         }
         return windows;
+    }
+
+    @Override
+    public List<AssetEntity> listRecommendationCandidates(int limit) {
+        if (limit < 1) {
+            return List.of();
+        }
+        return entityManager.createQuery(RECOMMENDATION_CANDIDATES_JPQL, AssetEntity.class)
+                .setParameter(
+                        "assetTypes",
+                        List.of(AssetType.STOCK, AssetType.ETF, AssetType.FUND, AssetType.INDEX)
+                )
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
+    @Override
+    public Map<Long, List<AssetPriceHistoryPoint>> findRecentPriceHistory(List<Long> assetIds, LocalDate startDate) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<AssetPriceHistoryPoint> points = entityManager.createQuery(
+                        RECENT_PRICE_HISTORY_JPQL,
+                        AssetPriceHistoryPoint.class
+                )
+                .setParameter("assetIds", assetIds)
+                .setParameter("startDate", startDate)
+                .getResultList();
+
+        Map<Long, List<AssetPriceHistoryPoint>> byAssetId = new LinkedHashMap<>();
+        for (AssetPriceHistoryPoint point : points) {
+            byAssetId.computeIfAbsent(point.assetId(), ignored -> new java.util.ArrayList<>()).add(point);
+        }
+        return byAssetId;
     }
 }
