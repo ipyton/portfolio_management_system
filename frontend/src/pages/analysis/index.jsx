@@ -49,7 +49,76 @@ function EmptyState({ title, description }) {
   );
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function createLinearTicks(min, max, count = 5) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return [];
+  }
+  if (Math.abs(max - min) < 1e-12) {
+    return [min];
+  }
+  return Array.from({ length: count }, (_, index) => min + ((max - min) * index) / (count - 1));
+}
+
+function buildIndexTicks(length, count = 5) {
+  if (length <= 0) {
+    return [];
+  }
+  if (length === 1) {
+    return [0];
+  }
+  const step = (length - 1) / (count - 1);
+  const ticks = Array.from({ length: count }, (_, index) => Math.round(index * step));
+  return [...new Set(ticks)];
+}
+
+function shortDateLabel(value) {
+  if (!value) {
+    return "N/A";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function SvgTooltip({ x, y, lines, chartWidth, chartHeight }) {
+  if (!lines?.length) {
+    return null;
+  }
+  const padding = 7;
+  const lineHeight = 14;
+  const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
+  const tooltipWidth = clamp(longest * 6 + padding * 2, 120, 220);
+  const tooltipHeight = padding * 2 + lineHeight * lines.length;
+  const left = clamp(x + 10, 6, chartWidth - tooltipWidth - 6);
+  const top = clamp(y - tooltipHeight - 10, 6, chartHeight - tooltipHeight - 6);
+
+  return (
+    <g className="chart-tooltip" transform={`translate(${left},${top})`}>
+      <rect width={tooltipWidth} height={tooltipHeight} rx="8" />
+      {lines.map((line, index) => (
+        <text key={`${line}-${index}`} x={padding} y={padding + 11 + index * lineHeight}>
+          {line}
+        </text>
+      ))}
+    </g>
+  );
+}
+
+function getSvgPointer(event, width, height) {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const x = bounds.width > 0 ? ((event.clientX - bounds.left) / bounds.width) * width : 0;
+  const y = bounds.height > 0 ? ((event.clientY - bounds.top) / bounds.height) * height : 0;
+  return { x, y };
+}
+
 function BacktestChart({ points }) {
+  const [hoverState, setHoverState] = useState(null);
+
   if (!points?.length) {
     return (
       <div className="history-empty">
@@ -59,10 +128,8 @@ function BacktestChart({ points }) {
     );
   }
 
-  const width = 560;
-  const height = 180;
-  const padding = 12;
-  const values = points.map((item) => Number(item.nav)).filter((value) => Number.isFinite(value));
+  const series = points.filter((item) => Number.isFinite(Number(item.nav)));
+  const values = series.map((item) => Number(item.nav));
   if (!values.length) {
     return (
       <div className="history-empty">
@@ -72,19 +139,54 @@ function BacktestChart({ points }) {
     );
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
-  const path = points
+  const width = 560;
+  const height = 220;
+  const margin = { top: 10, right: 10, bottom: 32, left: 52 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  const base = Number(series[0]?.nav) || 1;
+
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const yPadding = rawMax === rawMin ? Math.max(Math.abs(rawMax) * 0.04, 0.05) : (rawMax - rawMin) * 0.08;
+  const yMin = rawMin - yPadding;
+  const yMax = rawMax + yPadding;
+  const yRange = yMax - yMin || 1;
+
+  const mapX = (index) =>
+    margin.left + (series.length > 1 ? (index / (series.length - 1)) * chartWidth : chartWidth / 2);
+  const mapY = (value) => margin.top + ((yMax - value) / yRange) * chartHeight;
+
+  const path = series
     .map((item, index) => {
-      const x = padding + index * stepX;
-      const y = padding + ((max - Number(item.nav)) / range) * (height - padding * 2);
+      const x = mapX(index);
+      const y = mapY(Number(item.nav));
       return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
 
-  const totalReturn = Number(points[points.length - 1].nav) - Number(points[0].nav);
+  const totalReturn = Number(series[series.length - 1].nav) / base - 1;
+  const yTicks = createLinearTicks(yMin, yMax, 5);
+  const xTickIndexes = buildIndexTicks(series.length, 5);
+  const hoveredPoint = hoverState ? series[hoverState.index] : null;
+  const hoverX = hoveredPoint ? mapX(hoverState.index) : null;
+  const hoverY = hoveredPoint ? mapY(Number(hoveredPoint.nav)) : null;
+  const hoverReturn = hoveredPoint ? Number(hoveredPoint.nav) / base - 1 : null;
+  const hoverLineX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
+  const tooltipX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
+  const tooltipY = hoverState ? clamp(hoverState.pointerY, margin.top, height - margin.bottom) : null;
+
+  function handleMouseMove(event) {
+    const pointer = getSvgPointer(event, width, height);
+    const svgX = clamp(pointer.x, margin.left, width - margin.right);
+    const ratio = clamp((svgX - margin.left) / chartWidth, 0, 1);
+    const index = Math.round(ratio * (series.length - 1));
+    setHoverState({
+      index,
+      pointerX: svgX,
+      pointerY: clamp(pointer.y, margin.top, height - margin.bottom),
+    });
+  }
 
   return (
     <div className="history-chart">
@@ -94,14 +196,75 @@ function BacktestChart({ points }) {
           {formatSignedPercent(totalReturn)}
         </strong>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Backtest NAV chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Backtest NAV chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverState(null)}
+      >
+        {yTicks.map((tick) => {
+          const y = mapY(tick);
+          return (
+            <g key={`backtest-y-${tick.toFixed(6)}`}>
+              <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="chart-grid-line" />
+              <text x={margin.left - 8} y={y + 3} textAnchor="end" className="chart-axis-text">
+                {formatPercent(tick / base - 1, 1)}
+              </text>
+            </g>
+          );
+        })}
+        {xTickIndexes.map((index) => {
+          const x = mapX(index);
+          return (
+            <g key={`backtest-x-${index}`}>
+              <line x1={x} y1={margin.top} x2={x} y2={height - margin.bottom} className="chart-grid-line" />
+              <text x={x} y={height - margin.bottom + 14} textAnchor="middle" className="chart-axis-text">
+                {shortDateLabel(series[index]?.date)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={margin.left}
+          y1={height - margin.bottom}
+          x2={width - margin.right}
+          y2={height - margin.bottom}
+          className="chart-axis"
+        />
+        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} className="chart-axis" />
         <path d={path} className="history-line" />
+        {hoveredPoint ? (
+          <>
+            <line
+              x1={hoverLineX}
+              y1={margin.top}
+              x2={hoverLineX}
+              y2={height - margin.bottom}
+              className="chart-hover-line"
+            />
+            <circle cx={hoverX} cy={hoverY} r="4" className="chart-hover-dot" />
+            <SvgTooltip
+              x={tooltipX}
+              y={tooltipY}
+              chartWidth={width}
+              chartHeight={height}
+              lines={[
+                `${shortDateLabel(hoveredPoint.date)}`,
+                `NAV ${(Number(hoveredPoint.nav) || 0).toFixed(4)}`,
+                `Return ${formatSignedPercent(hoverReturn || 0)}`,
+              ]}
+            />
+          </>
+        ) : null}
       </svg>
     </div>
   );
 }
 
 function SimulationChart({ meanPath, samplePaths }) {
+  const [hoverState, setHoverState] = useState(null);
+
   if (!meanPath?.length) {
     return (
       <div className="history-empty">
@@ -111,10 +274,8 @@ function SimulationChart({ meanPath, samplePaths }) {
     );
   }
 
-  const width = 560;
-  const height = 180;
-  const padding = 12;
-  const allSeries = [...(samplePaths || []).map((item) => item.points || []), meanPath];
+  const normalizedMeanPath = meanPath.filter((item) => Number.isFinite(Number(item.value)));
+  const allSeries = [...(samplePaths || []).map((item) => item.points || []), normalizedMeanPath];
   const values = allSeries
     .flatMap((series) => series.map((point) => Number(point.value)))
     .filter((value) => Number.isFinite(value));
@@ -128,39 +289,137 @@ function SimulationChart({ meanPath, samplePaths }) {
     );
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const stepX = meanPath.length > 1 ? (width - padding * 2) / (meanPath.length - 1) : 0;
+  const width = 560;
+  const height = 220;
+  const margin = { top: 10, right: 10, bottom: 32, left: 52 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  const base = Number(normalizedMeanPath[0]?.value) || 1;
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const yPadding = rawMax === rawMin ? Math.max(Math.abs(rawMax) * 0.04, 0.05) : (rawMax - rawMin) * 0.08;
+  const yMin = rawMin - yPadding;
+  const yMax = rawMax + yPadding;
+  const yRange = yMax - yMin || 1;
+
+  const mapX = (index) =>
+    margin.left + (normalizedMeanPath.length > 1 ? (index / (normalizedMeanPath.length - 1)) * chartWidth : chartWidth / 2);
+  const mapY = (value) => margin.top + ((yMax - value) / yRange) * chartHeight;
 
   const linePath = (series) =>
     series
       .map((point, index) => {
-        const x = padding + index * stepX;
-        const y = padding + ((max - Number(point.value)) / range) * (height - padding * 2);
+        const x = mapX(index);
+        const y = mapY(Number(point.value));
         return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
       })
       .join(" ");
+
+  const yTicks = createLinearTicks(yMin, yMax, 5);
+  const xTickIndexes = buildIndexTicks(normalizedMeanPath.length, 5);
+  const hoveredPoint = hoverState ? normalizedMeanPath[hoverState.index] : null;
+  const hoverX = hoveredPoint ? mapX(hoverState.index) : null;
+  const hoverY = hoveredPoint ? mapY(Number(hoveredPoint.value)) : null;
+  const hoverReturn = hoveredPoint ? Number(hoveredPoint.value) / base - 1 : null;
+  const hoverLineX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
+  const tooltipX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
+  const tooltipY = hoverState ? clamp(hoverState.pointerY, margin.top, height - margin.bottom) : null;
+
+  function handleMouseMove(event) {
+    const pointer = getSvgPointer(event, width, height);
+    const svgX = clamp(pointer.x, margin.left, width - margin.right);
+    const ratio = clamp((svgX - margin.left) / chartWidth, 0, 1);
+    const index = Math.round(ratio * (normalizedMeanPath.length - 1));
+    setHoverState({
+      index,
+      pointerX: svgX,
+      pointerY: clamp(pointer.y, margin.top, height - margin.bottom),
+    });
+  }
 
   return (
     <div className="history-chart simulation-chart">
       <div className="history-meta">
         <span>Monte Carlo Projection</span>
         <strong>
-          Mean terminal: {formatSignedPercent(Number(meanPath[meanPath.length - 1]?.value) / Number(meanPath[0]?.value) - 1)}
+          Mean terminal:{" "}
+          {formatSignedPercent(
+            Number(normalizedMeanPath[normalizedMeanPath.length - 1]?.value) / Number(normalizedMeanPath[0]?.value) - 1,
+          )}
         </strong>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monte Carlo portfolio path chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Monte Carlo portfolio path chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverState(null)}
+      >
+        {yTicks.map((tick) => {
+          const y = mapY(tick);
+          return (
+            <g key={`sim-y-${tick.toFixed(6)}`}>
+              <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="chart-grid-line" />
+              <text x={margin.left - 8} y={y + 3} textAnchor="end" className="chart-axis-text">
+                {formatPercent(tick / base - 1, 1)}
+              </text>
+            </g>
+          );
+        })}
+        {xTickIndexes.map((index) => {
+          const x = mapX(index);
+          return (
+            <g key={`sim-x-${index}`}>
+              <line x1={x} y1={margin.top} x2={x} y2={height - margin.bottom} className="chart-grid-line" />
+              <text x={x} y={height - margin.bottom + 14} textAnchor="middle" className="chart-axis-text">
+                {(Number(normalizedMeanPath[index]?.time || 0) * 100).toFixed(0)}%
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={margin.left}
+          y1={height - margin.bottom}
+          x2={width - margin.right}
+          y2={height - margin.bottom}
+          className="chart-axis"
+        />
+        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} className="chart-axis" />
         {(samplePaths || []).slice(0, 6).map((path) => (
           <path key={path.pathIndex} d={linePath(path.points || [])} className="simulation-line" />
         ))}
-        <path d={linePath(meanPath)} className="history-line simulation-mean-line" />
+        <path d={linePath(normalizedMeanPath)} className="history-line simulation-mean-line" />
+        {hoveredPoint ? (
+          <>
+            <line
+              x1={hoverLineX}
+              y1={margin.top}
+              x2={hoverLineX}
+              y2={height - margin.bottom}
+              className="chart-hover-line"
+            />
+            <circle cx={hoverX} cy={hoverY} r="4" className="chart-hover-dot" />
+            <SvgTooltip
+              x={tooltipX}
+              y={tooltipY}
+              chartWidth={width}
+              chartHeight={height}
+              lines={[
+                `Step ${hoveredPoint.step}`,
+                `Value ${(Number(hoveredPoint.value) || 0).toFixed(4)}`,
+                `Return ${formatSignedPercent(hoverReturn || 0)}`,
+              ]}
+            />
+          </>
+        ) : null}
       </svg>
     </div>
   );
 }
 
 function EfficientFrontierChart({ points, optimal }) {
+  const [hoverState, setHoverState] = useState(null);
+
   if (!points?.length) {
     return (
       <div className="history-empty">
@@ -172,7 +431,9 @@ function EfficientFrontierChart({ points, optimal }) {
 
   const width = 560;
   const height = 220;
-  const padding = 18;
+  const margin = { top: 10, right: 10, bottom: 34, left: 52 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
   const vols = points.map((point) => point.volatility).filter((value) => Number.isFinite(value));
   const rets = points.map((point) => point.expectedReturn).filter((value) => Number.isFinite(value));
   if (!vols.length || !rets.length) {
@@ -191,10 +452,45 @@ function EfficientFrontierChart({ points, optimal }) {
   const volRange = maxVol - minVol || 1;
   const retRange = maxRet - minRet || 1;
 
-  const mapX = (vol) => padding + ((vol - minVol) / volRange) * (width - padding * 2);
-  const mapY = (ret) => height - padding - ((ret - minRet) / retRange) * (height - padding * 2);
+  const mapX = (vol) => margin.left + ((vol - minVol) / volRange) * chartWidth;
+  const mapY = (ret) => margin.top + ((maxRet - ret) / retRange) * chartHeight;
 
   const chartPoints = points.slice(0, 3500);
+  const xTicks = createLinearTicks(minVol, maxVol, 5);
+  const yTicks = createLinearTicks(minRet, maxRet, 5);
+  const hoverPoint = hoverState?.point || null;
+  const hoverX = hoverPoint ? mapX(hoverPoint.volatility) : null;
+  const hoverY = hoverPoint ? mapY(hoverPoint.expectedReturn) : null;
+  const hoverLineX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
+  const hoverLineY = hoverState ? clamp(hoverState.pointerY, margin.top, height - margin.bottom) : null;
+  const tooltipX = hoverState ? hoverLineX : null;
+  const tooltipY = hoverState ? hoverLineY : null;
+
+  function handleMouseMove(event) {
+    const pointer = getSvgPointer(event, width, height);
+    const svgX = pointer.x;
+    const svgY = pointer.y;
+    const clampedX = clamp(svgX, margin.left, width - margin.right);
+    const clampedY = clamp(svgY, margin.top, height - margin.bottom);
+    const volGuess = minVol + ((clampedX - margin.left) / chartWidth) * volRange;
+    const retGuess = maxRet - ((clampedY - margin.top) / chartHeight) * retRange;
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    chartPoints.forEach((point) => {
+      const dx = (point.volatility - volGuess) / volRange;
+      const dy = (point.expectedReturn - retGuess) / retRange;
+      const dist = dx * dx + dy * dy;
+      if (dist < nearestDistance) {
+        nearestDistance = dist;
+        nearest = point;
+      }
+    });
+    setHoverState({
+      point: nearest,
+      pointerX: clampedX,
+      pointerY: clampedY,
+    });
+  }
 
   return (
     <div className="frontier-chart">
@@ -202,7 +498,43 @@ function EfficientFrontierChart({ points, optimal }) {
         <span>Efficient Frontier</span>
         <strong>Max Sharpe: {optimal ? optimal.sharpeRatio.toFixed(3) : "N/A"}</strong>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Sharpe frontier scatter chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Sharpe frontier scatter chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverState(null)}
+      >
+        {yTicks.map((tick) => {
+          const y = mapY(tick);
+          return (
+            <g key={`frontier-y-${tick.toFixed(6)}`}>
+              <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="chart-grid-line" />
+              <text x={margin.left - 8} y={y + 3} textAnchor="end" className="chart-axis-text">
+                {formatPercent(tick, 1)}
+              </text>
+            </g>
+          );
+        })}
+        {xTicks.map((tick) => {
+          const x = mapX(tick);
+          return (
+            <g key={`frontier-x-${tick.toFixed(6)}`}>
+              <line x1={x} y1={margin.top} x2={x} y2={height - margin.bottom} className="chart-grid-line" />
+              <text x={x} y={height - margin.bottom + 14} textAnchor="middle" className="chart-axis-text">
+                {formatPercent(tick, 1)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={margin.left}
+          y1={height - margin.bottom}
+          x2={width - margin.right}
+          y2={height - margin.bottom}
+          className="chart-axis"
+        />
+        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} className="chart-axis" />
         {chartPoints.map((point, index) => (
           <circle
             key={`${index}-${point.volatility}`}
@@ -220,24 +552,91 @@ function EfficientFrontierChart({ points, optimal }) {
             className="frontier-optimal-dot"
           />
         ) : null}
+        {hoverPoint ? (
+          <>
+            <line
+              x1={hoverLineX}
+              y1={margin.top}
+              x2={hoverLineX}
+              y2={height - margin.bottom}
+              className="chart-hover-line"
+            />
+            <line
+              x1={margin.left}
+              y1={hoverLineY}
+              x2={width - margin.right}
+              y2={hoverLineY}
+              className="chart-hover-line"
+            />
+            <circle cx={hoverX} cy={hoverY} r="4" className="chart-hover-dot" />
+            <SvgTooltip
+              x={tooltipX}
+              y={tooltipY}
+              chartWidth={width}
+              chartHeight={height}
+              lines={[
+                `Return ${formatPercent(hoverPoint.expectedReturn, 2)}`,
+                `Vol ${formatPercent(hoverPoint.volatility, 2)}`,
+                `Sharpe ${Number(hoverPoint.sharpeRatio).toFixed(3)}`,
+              ]}
+            />
+          </>
+        ) : null}
       </svg>
     </div>
   );
 }
 
 function OptimalWeightsChart({ weights }) {
+  const [hoverState, setHoverState] = useState(null);
+
   if (!weights?.length) {
     return null;
   }
 
   const width = 560;
-  const height = 220;
-  const padding = 18;
-  const innerWidth = width - padding * 2;
-  const innerHeight = height - padding * 2;
+  const height = 240;
+  const margin = { top: 12, right: 10, bottom: 34, left: 52 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
   const barGap = 10;
-  const barWidth = Math.max(12, (innerWidth - barGap * (weights.length - 1)) / weights.length);
-  const maxWeight = Math.max(...weights.map((item) => Number(item.weight) || 0), 1);
+  const barWidth = Math.max(12, (chartWidth - barGap * (weights.length - 1)) / weights.length);
+  const maxWeight = Math.max(...weights.map((item) => Number(item.weight) || 0), 0.01);
+  const yTicks = createLinearTicks(0, maxWeight * 1.1, 5);
+  const hovered = hoverState ? weights[hoverState.index] : null;
+
+  function nearestWeightIndex(pointerX) {
+    if (!weights.length) {
+      return null;
+    }
+    let nearest = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    weights.forEach((_, index) => {
+      const center = margin.left + index * (barWidth + barGap) + barWidth / 2;
+      const dist = Math.abs(center - pointerX);
+      if (dist < nearestDistance) {
+        nearestDistance = dist;
+        nearest = index;
+      }
+    });
+    return nearest;
+  }
+
+  function handleMouseMove(event) {
+    const pointer = getSvgPointer(event, width, height);
+    const clampedX = clamp(pointer.x, margin.left, width - margin.right);
+    const clampedY = clamp(pointer.y, margin.top, height - margin.bottom);
+    const index = nearestWeightIndex(clampedX);
+    if (index === null) {
+      setHoverState(null);
+      return;
+    }
+    setHoverState({
+      index,
+      pointerX: clampedX,
+      pointerY: clampedY,
+    });
+  }
 
   return (
     <div className="weights-chart">
@@ -245,12 +644,38 @@ function OptimalWeightsChart({ weights }) {
         <span>Optimal Weights</span>
         <strong>Allocation by Asset</strong>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Optimal portfolio weights bar chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Optimal portfolio weights bar chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverState(null)}
+      >
+        {yTicks.map((tick) => {
+          const y = margin.top + ((maxWeight * 1.1 - tick) / (maxWeight * 1.1 || 1)) * chartHeight;
+          return (
+            <g key={`weights-y-${tick.toFixed(6)}`}>
+              <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="chart-grid-line" />
+              <text x={margin.left - 8} y={y + 3} textAnchor="end" className="chart-axis-text">
+                {formatPercent(tick, 1)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={margin.left}
+          y1={height - margin.bottom}
+          x2={width - margin.right}
+          y2={height - margin.bottom}
+          className="chart-axis"
+        />
+        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} className="chart-axis" />
         {weights.map((item, index) => {
           const weight = Number(item.weight) || 0;
-          const x = padding + index * (barWidth + barGap);
-          const h = Math.max(0, (weight / maxWeight) * (innerHeight - 28));
-          const y = height - padding - h - 20;
+          const x = margin.left + index * (barWidth + barGap);
+          const h = Math.max(0, (weight / (maxWeight * 1.1 || 1)) * chartHeight);
+          const y = height - margin.bottom - h;
+          const labelY = height - margin.bottom + 14;
           return (
             <g key={item.symbol}>
               <rect
@@ -261,7 +686,7 @@ function OptimalWeightsChart({ weights }) {
                 className="weights-bar"
                 rx="4"
               />
-              <text x={x + barWidth / 2} y={height - padding - 6} textAnchor="middle" className="weights-ticker">
+              <text x={x + barWidth / 2} y={labelY} textAnchor="middle" className="weights-ticker">
                 {item.symbol}
               </text>
               <text x={x + barWidth / 2} y={Math.max(y - 4, 12)} textAnchor="middle" className="weights-value">
@@ -270,6 +695,18 @@ function OptimalWeightsChart({ weights }) {
             </g>
           );
         })}
+        {hovered ? (
+          <SvgTooltip
+            x={hoverState.pointerX}
+            y={hoverState.pointerY}
+            chartWidth={width}
+            chartHeight={height}
+            lines={[
+              `${hovered.symbol}`,
+              `Weight ${(Number(hovered.weight) * 100).toFixed(2)}%`,
+            ]}
+          />
+        ) : null}
       </svg>
     </div>
   );

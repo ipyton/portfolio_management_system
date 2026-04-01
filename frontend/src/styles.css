@@ -977,6 +977,51 @@ button {
   stroke-linejoin: round;
 }
 
+.chart-axis {
+  stroke: rgba(15, 23, 42, 0.56);
+  stroke-width: 1.1;
+}
+
+.chart-grid-line {
+  stroke: rgba(148, 163, 184, 0.34);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.chart-axis-text {
+  fill: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.chart-hover-line {
+  stroke: rgba(30, 64, 175, 0.4);
+  stroke-width: 1.1;
+  stroke-dasharray: 4 4;
+}
+
+.chart-hover-dot {
+  fill: #ffffff;
+  stroke: #1d4ed8;
+  stroke-width: 2;
+}
+
+.chart-tooltip {
+  pointer-events: none;
+}
+
+.chart-tooltip rect {
+  fill: rgba(17, 24, 39, 0.94);
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 1;
+}
+
+.chart-tooltip text {
+  fill: #f8fafc;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .history-empty {
   border: 1px dashed rgba(122, 135, 170, 0.4);
   border-radius: 12px;
@@ -1283,5 +1328,10 @@ button {
   .analysis-controls {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .chart-axis-text,
+  .chart-tooltip text {
+    font-size: 9px;
   }
 }
