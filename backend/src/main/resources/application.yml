@@ -6,6 +6,10 @@ spring:
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    jpa:
+      repositories:
+        bootstrap-mode: lazy
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
@@ -15,3 +19,55 @@ spring:
         format_sql: true
 server:
   port: ${SERVER_PORT:8080}
+security:
+  request-key:
+    header-name: ${REQUEST_KEY_HEADER:X-Request-Key}
+    value: ${REQUEST_KEY:ef928c10-2da4-4ca6-9b49-dedc912d5b4c}
+resilience:
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    max-requests: ${RATE_LIMIT_MAX_REQUESTS:60}
+    window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
+  degradation:
+    enabled: ${DEGRADATION_ENABLED:false}
+    allow-path-prefixes: ${DEGRADATION_ALLOW_PATHS:/api/health,/swagger-ui,/v3/api-docs}
+    message: ${DEGRADATION_MESSAGE:Service is temporarily degraded. Please try again later.}
+springdoc:
+  api-docs:
+    path: ${SPRINGDOC_API_DOCS_PATH:/v3/api-docs}
+  swagger-ui:
+    path: ${SPRINGDOC_SWAGGER_UI_PATH:/swagger-ui.html}
+    operations-sorter: alpha
+    tags-sorter: alpha
+scheduler:
+  zone: ${SCHEDULER_ZONE:UTC}
+  pool:
+    size: ${SCHEDULER_POOL_SIZE:4}
+    shutdown-await-termination-seconds: ${SCHEDULER_SHUTDOWN_WAIT_SECONDS:30}
+  jobs:
+    market-data-refresh:
+      enabled: ${JOB_MARKET_DATA_REFRESH_ENABLED:true}
+      cron: ${JOB_MARKET_DATA_REFRESH_CRON:0 0 22 * * MON-FRI}
+    fx-rate-refresh:
+      enabled: ${JOB_FX_RATE_REFRESH_ENABLED:true}
+      cron: ${JOB_FX_RATE_REFRESH_CRON:0 */5 * * * *}
+    portfolio-nav-snapshot:
+      enabled: ${JOB_PORTFOLIO_NAV_SNAPSHOT_ENABLED:true}
+      cron: ${JOB_PORTFOLIO_NAV_SNAPSHOT_CRON:0 10 22 * * MON-FRI}
+    system-config-refresh:
+      enabled: ${JOB_SYSTEM_CONFIG_REFRESH_ENABLED:true}
+      cron: ${JOB_SYSTEM_CONFIG_REFRESH_CRON:0 0 6 * * MON}
+yahoo-finance:
+  enabled: ${YAHOO_FINANCE_ENABLED:true}
+  base-url: ${YAHOO_FINANCE_BASE_URL:https://query1.finance.yahoo.com}
+  timeout: ${YAHOO_FINANCE_TIMEOUT:5s}
+  user-agent: ${YAHOO_FINANCE_USER_AGENT:portfolio-management-system/1.0}
+fx:
+  enabled: ${FX_ENABLED:true}
+  reporting-currency: ${FX_REPORTING_CURRENCY:CNY}
+  persist-history: ${FX_PERSIST_HISTORY:true}
+  stale-after: ${FX_STALE_AFTER:30m}
+  tracked-currencies: ${FX_TRACKED_CURRENCIES:CNY,USD,HKD}
+  symbols:
+    USD: ${FX_SYMBOL_USD:USDCNY=X}
+    HKD: ${FX_SYMBOL_HKD:HKDCNY=X}
