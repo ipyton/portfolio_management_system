@@ -7,6 +7,7 @@ import com.noah.portfolio.asset.dto.*;
 import com.noah.portfolio.asset.entity.*;
 import com.noah.portfolio.asset.model.*;
 import com.noah.portfolio.asset.repository.*;
+import com.noah.portfolio.common.RegionCodeNormalizer;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -46,6 +47,8 @@ public class AssetSearchService {
     private static final int DEFAULT_RECOMMENDATION_LOOKBACK_DAYS = 180;
     private static final int MIN_RECOMMENDATION_LOOKBACK_DAYS = 30;
     private static final int MAX_ASSET_CREATE_RETRIES = 8;
+    private static final String DEFAULT_CANDLE_INTERVAL = "1day";
+    private static final Set<String> SUPPORTED_CANDLE_INTERVALS = Set.of("1day", "1week", "1month");
     private static final Set<String> KNOWN_INDEX_SYMBOLS = Set.of(
             "SPX", "IXIC", "DJI", "FTSE", "GDAXI", "FCHI", "N225", "HSI", "SSEC", "BSESN", "NSEI", "AXJO", "KS11", "TSX", "000300.SH"
     );
@@ -53,6 +56,7 @@ public class AssetSearchService {
     private final AssetSearchDataRepository assetSearchDataRepository;
     private final AssetRepository assetRepository;
     private final AssetPriceDailyRepository assetPriceDailyRepository;
+    private final AssetCandleCacheRepository assetCandleCacheRepository;
     private final FinnhubClient finnhubClient;
     private final YahooFinanceClient yahooFinanceClient;
     private final TwelveDataClient twelveDataClient;
@@ -65,6 +69,7 @@ public class AssetSearchService {
             AssetSearchDataRepository assetSearchDataRepository,
             AssetRepository assetRepository,
             AssetPriceDailyRepository assetPriceDailyRepository,
+            AssetCandleCacheRepository assetCandleCacheRepository,
             FinnhubClient finnhubClient,
             YahooFinanceClient yahooFinanceClient,
             TwelveDataClient twelveDataClient,
@@ -74,6 +79,7 @@ public class AssetSearchService {
         this.assetSearchDataRepository = assetSearchDataRepository;
         this.assetRepository = assetRepository;
         this.assetPriceDailyRepository = assetPriceDailyRepository;
+        this.assetCandleCacheRepository = assetCandleCacheRepository;
         this.finnhubClient = finnhubClient;
         this.yahooFinanceClient = yahooFinanceClient;
         this.twelveDataClient = twelveDataClient;
@@ -183,7 +189,7 @@ public class AssetSearchService {
                     return new AssetWorldIndexItem(
                             asset.getSymbol(),
                             asset.getName(),
-                            asset.getRegion(),
+                            normalizeRegion(asset.getRegion(), asset.getSymbol()),
                             asset.getExchange(),
                             asset.getCurrency(),
                             latest == null ? null : latest.latestTradeDate(),
@@ -431,6 +437,222 @@ public class AssetSearchService {
         );
     }
 
+    @Transactional
+    public AssetCandleHistoryResponse candleHistory(String query, Integer days, String interval) {
+        String normalizedQuery = normalizeQuery(query);
+        String normalizedLookupQuery = normalizeHistoryLookupQuery(normalizedQuery);
+        int historyDays = normalizeHistoryDays(days);
+        String normalizedInterval = normalizeCandleInterval(interval);
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(historyDays - 1L);
+
+        List<String> warnings = new ArrayList<>();
+        if (!normalizedLookupQuery.equalsIgnoreCase(normalizedQuery)) {
+            warnings.add("Symbol " + normalizedQuery.toUpperCase(Locale.ROOT)
+                    + " is mapped to " + normalizedLookupQuery.toUpperCase(Locale.ROOT) + ".");
+        }
+
+        AssetEntity localAsset = resolveLocalAsset(normalizedLookupQuery);
+        String resolvedSymbol = localAsset != null && StringUtils.hasText(localAsset.getSymbol())
+                ? localAsset.getSymbol().toUpperCase(Locale.ROOT)
+                : normalizedLookupQuery.toUpperCase(Locale.ROOT);
+
+        List<AssetCandleHistoryItem> cachedItems = loadCachedCandles(
+                resolvedSymbol,
+                normalizedInterval,
+                startDate,
+                endDate
+        );
+        if (!cachedItems.isEmpty() && !candleCacheNeedsRefresh(cachedItems, endDate, normalizedInterval)) {
+            return new AssetCandleHistoryResponse(
+                    normalizedQuery,
+                    resolvedSymbol,
+                    "DATABASE_CANDLE_CACHE",
+                    cachedItems.size(),
+                    cachedItems,
+                    warnings
+            );
+        }
+
+        List<AssetCandleHistoryItem> twelveDataItems = List.of();
+        try {
+            twelveDataItems = twelveDataClient.fetchDailyCandles(
+                    resolvedSymbol,
+                    normalizedInterval,
+                    startDate,
+                    endDate
+            );
+        } catch (TwelveDataClient.TwelveDataLookupException ex) {
+            warnings.add("Twelve Data candle lookup failed: " + sanitizeWarningMessage(ex.getMessage()) + ".");
+        }
+        if (!twelveDataItems.isEmpty()) {
+            cacheCandleItems(resolvedSymbol, normalizedInterval, twelveDataItems, "TWELVE_DATA");
+            return new AssetCandleHistoryResponse(
+                    normalizedQuery,
+                    resolvedSymbol,
+                    "TWELVE_DATA",
+                    twelveDataItems.size(),
+                    twelveDataItems,
+                    warnings
+            );
+        }
+
+        warnings.add("No candle data returned from Twelve Data for symbol " + resolvedSymbol + ".");
+        if (!cachedItems.isEmpty()) {
+            warnings.add("Using stale candle cache from database.");
+            return new AssetCandleHistoryResponse(
+                    normalizedQuery,
+                    resolvedSymbol,
+                    "DATABASE_CANDLE_CACHE",
+                    cachedItems.size(),
+                    cachedItems,
+                    warnings
+            );
+        }
+        if (localAsset == null) {
+            return new AssetCandleHistoryResponse(
+                    normalizedQuery,
+                    resolvedSymbol,
+                    "TWELVE_DATA",
+                    0,
+                    List.of(),
+                    warnings
+            );
+        }
+
+        List<AssetCandleHistoryItem> localItems = assetPriceDailyRepository.findPriceHistory(
+                        localAsset.getId(),
+                        startDate,
+                        endDate
+                ).stream()
+                .map(point -> new AssetCandleHistoryItem(
+                        point.tradeDate(),
+                        point.close(),
+                        point.close(),
+                        point.close(),
+                        point.close()
+                ))
+                .toList();
+        if (localItems.isEmpty()) {
+            warnings.add("No local price history found for symbol " + resolvedSymbol + ".");
+            return new AssetCandleHistoryResponse(
+                    normalizedQuery,
+                    resolvedSymbol,
+                    "DATABASE_CLOSE_ONLY",
+                    0,
+                    List.of(),
+                    warnings
+            );
+        }
+
+        warnings.add("Falling back to database close-only candles.");
+        return new AssetCandleHistoryResponse(
+                normalizedQuery,
+                resolvedSymbol,
+                "DATABASE_CLOSE_ONLY",
+                localItems.size(),
+                localItems,
+                warnings
+        );
+    }
+
+    private List<AssetCandleHistoryItem> loadCachedCandles(
+            String symbol,
+            String interval,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        if (!StringUtils.hasText(symbol)) {
+            return List.of();
+        }
+        return assetCandleCacheRepository.findBySymbolIgnoreCaseAndCandleIntervalAndTradeDateBetweenOrderByTradeDateAsc(
+                        symbol.trim().toUpperCase(Locale.ROOT),
+                        interval,
+                        startDate,
+                        endDate
+                ).stream()
+                .map(item -> new AssetCandleHistoryItem(
+                        item.getTradeDate(),
+                        item.getOpen(),
+                        item.getHigh(),
+                        item.getLow(),
+                        item.getClose()
+                ))
+                .toList();
+    }
+
+    private boolean candleCacheNeedsRefresh(
+            List<AssetCandleHistoryItem> cachedItems,
+            LocalDate endDate,
+            String interval
+    ) {
+        if (cachedItems == null || cachedItems.isEmpty()) {
+            return true;
+        }
+        LocalDate latestTradeDate = cachedItems.get(cachedItems.size() - 1).tradeDate();
+        if (latestTradeDate == null) {
+            return true;
+        }
+        LocalDate staleThreshold = endDate.minusDays(candleStaleToleranceDays(interval));
+        return latestTradeDate.isBefore(staleThreshold);
+    }
+
+    private int candleStaleToleranceDays(String interval) {
+        return switch (interval) {
+            case "1week" -> 10;
+            case "1month" -> 40;
+            default -> 3;
+        };
+    }
+
+    private void cacheCandleItems(
+            String symbol,
+            String interval,
+            List<AssetCandleHistoryItem> items,
+            String source
+    ) {
+        if (!StringUtils.hasText(symbol) || !StringUtils.hasText(interval) || items == null || items.isEmpty()) {
+            return;
+        }
+        String normalizedSymbol = symbol.trim().toUpperCase(Locale.ROOT);
+        Instant now = Instant.now();
+        for (AssetCandleHistoryItem item : items) {
+            if (item == null
+                    || item.tradeDate() == null
+                    || item.open() == null
+                    || item.high() == null
+                    || item.low() == null
+                    || item.close() == null) {
+                continue;
+            }
+
+            AssetCandleCacheEntity existing = assetCandleCacheRepository
+                    .findFirstBySymbolIgnoreCaseAndCandleIntervalAndTradeDateOrderByIdAsc(
+                            normalizedSymbol,
+                            interval,
+                            item.tradeDate()
+                    )
+                    .orElse(null);
+            if (existing != null) {
+                existing.updateFrom(item.open(), item.high(), item.low(), item.close(), source, now);
+                assetCandleCacheRepository.save(existing);
+                continue;
+            }
+
+            assetCandleCacheRepository.save(new AssetCandleCacheEntity(
+                    normalizedSymbol,
+                    interval,
+                    item.tradeDate(),
+                    item.open(),
+                    item.high(),
+                    item.low(),
+                    item.close(),
+                    source,
+                    now
+            ));
+        }
+    }
+
     private DatabaseAssetDetail toDatabaseAssetDetail(AssetEntity asset, AssetLatestPriceSnapshot latestPrice) {
         AssetStockDetailEntity stockDetail = asset.getStockDetail();
         AssetEtfDetailEntity etfDetail = asset.getEtfDetail();
@@ -508,7 +730,7 @@ public class AssetSearchService {
                 detail.name(),
                 detail.assetType(),
                 detail.exchange(),
-                firstNonBlank(detail.region(), inferRegion(detail.symbol()))
+                normalizeRegion(detail.region(), detail.symbol())
         );
     }
 
@@ -519,7 +741,7 @@ public class AssetSearchService {
                 asset.getName(),
                 asset.getAssetType().name(),
                 asset.getExchange(),
-                firstNonBlank(asset.getRegion(), inferRegion(asset.getSymbol()))
+                normalizeRegion(asset.getRegion(), asset.getSymbol())
         );
     }
 
@@ -530,7 +752,15 @@ public class AssetSearchService {
                 firstNonBlank(remote.longName(), remote.shortName(), remote.symbol()),
                 remote.quoteType(),
                 remote.exchange(),
-                firstNonBlank(remote.region(), inferRegion(remote.symbol()))
+                normalizeRegion(remote.region(), remote.symbol())
+        );
+    }
+
+    private String normalizeRegion(String rawRegion, String symbol) {
+        return firstNonBlank(
+                RegionCodeNormalizer.normalize(rawRegion),
+                inferRegion(symbol),
+                "UNKNOWN"
         );
     }
 
@@ -565,6 +795,20 @@ public class AssetSearchService {
             );
         }
         return days;
+    }
+
+    private String normalizeCandleInterval(String interval) {
+        if (!StringUtils.hasText(interval)) {
+            return DEFAULT_CANDLE_INTERVAL;
+        }
+        String normalized = interval.trim().toLowerCase(Locale.ROOT);
+        if (!SUPPORTED_CANDLE_INTERVALS.contains(normalized)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Interval must be one of: 1day, 1week, 1month."
+            );
+        }
+        return normalized;
     }
 
     private AssetEntity resolveLocalAsset(String query) {

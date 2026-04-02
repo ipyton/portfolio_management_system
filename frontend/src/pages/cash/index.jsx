@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import LoadingInline from "../../components/LoadingInline";
 import {
   buildFxRateMap,
   convertAmountByFx,
@@ -190,7 +191,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
             onClick={() => refreshData(currencyFilter)}
             disabled={loading || submitting}
           >
-            {loading ? "Refreshing..." : "Refresh"}
+            {loading ? <LoadingInline label="Refreshing..." size="xs" /> : "Refresh"}
           </button>
         </div>
         <p className="hero-copy cash-hero-copy">
@@ -198,7 +199,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
         </p>
         <div className="cash-status-row">
           <span className={`cash-status-pill${loading ? " loading" : ""}`}>
-            {loading ? "Syncing data" : "Data synced"}
+            {loading ? <LoadingInline label="Syncing data" size="xs" /> : "Data synced"}
           </span>
           <span className="cash-status-time">
             Last updated: {lastUpdated ? formatDateTime(lastUpdated) : "N/A"}
@@ -268,7 +269,11 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
               />
 
               <button type="submit" disabled={submitting || loading}>
-                {submitting ? "Submitting..." : actionType === "withdraw" ? "Submit Withdraw" : "Submit Deposit"}
+                {submitting
+                  ? <LoadingInline label="Submitting..." size="xs" tone="inverted" />
+                  : actionType === "withdraw"
+                    ? "Submit Withdraw"
+                    : "Submit Deposit"}
               </button>
             </form>
           </section>
@@ -290,7 +295,11 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                 ))}
               </div>
             ) : (
-              <p className="cash-empty">No cash account balance yet.</p>
+              <p className="cash-empty">
+                {loading
+                  ? <LoadingInline label="Loading balances..." size="xs" tone="muted" />
+                  : "No cash account balance yet."}
+              </p>
             )}
           </section>
         </div>
@@ -356,7 +365,11 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                 ) : (
                   <tr>
                     <td colSpan={8}>
-                      <p className="cash-empty">No transactions yet.</p>
+                      <p className="cash-empty">
+                        {loading
+                          ? <LoadingInline label="Loading transactions..." size="xs" tone="muted" />
+                          : "No transactions yet."}
+                      </p>
                     </td>
                   </tr>
                 )}

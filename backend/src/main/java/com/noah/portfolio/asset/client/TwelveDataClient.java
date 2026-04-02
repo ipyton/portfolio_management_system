@@ -26,6 +26,7 @@ import org.springframework.web.client.RestClientException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.noah.portfolio.asset.config.TwelveDataProperties;
+import com.noah.portfolio.asset.dto.AssetCandleHistoryItem;
 import com.noah.portfolio.asset.dto.AssetPriceHistoryItem;
 
 @Component
@@ -67,6 +68,21 @@ public class TwelveDataClient {
     }
 
     public List<AssetPriceHistoryItem> fetchDailyHistory(String symbol, LocalDate startDate, LocalDate endDate) {
+        return fetchDailyCandles(symbol, "1day", startDate, endDate).stream()
+                .map(item -> new AssetPriceHistoryItem(item.tradeDate(), item.close()))
+                .toList();
+    }
+
+    public List<AssetCandleHistoryItem> fetchDailyCandles(String symbol, LocalDate startDate, LocalDate endDate) {
+        return fetchDailyCandles(symbol, "1day", startDate, endDate);
+    }
+
+    public List<AssetCandleHistoryItem> fetchDailyCandles(
+            String symbol,
+            String interval,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         if (!properties.isEnabled() || properties.resolveApiKeys().isEmpty()) {
             return List.of();
         }
@@ -83,7 +99,7 @@ public class TwelveDataClient {
                         .uri(uriBuilder -> uriBuilder
                                 .path(TIME_SERIES_PATH)
                                 .queryParam("symbol", symbol)
-                                .queryParam("interval", "1day")
+                                .queryParam("interval", interval)
                                 .queryParam("outputsize", 120)
                                 .queryParam("apikey", apiKey)
                                 .build())
@@ -105,20 +121,23 @@ public class TwelveDataClient {
                     return List.of();
                 }
 
-                List<AssetPriceHistoryItem> items = new ArrayList<>();
+                List<AssetCandleHistoryItem> items = new ArrayList<>();
                 for (JsonNode value : values) {
                     LocalDate tradeDate = parseDate(text(value, "datetime"));
+                    BigDecimal open = decimal(text(value, "open"));
+                    BigDecimal high = decimal(text(value, "high"));
+                    BigDecimal low = decimal(text(value, "low"));
                     BigDecimal close = decimal(text(value, "close"));
-                    if (tradeDate == null || close == null) {
+                    if (tradeDate == null || open == null || high == null || low == null || close == null) {
                         continue;
                     }
                     if (tradeDate.isBefore(startDate) || tradeDate.isAfter(endDate)) {
                         continue;
                     }
-                    items.add(new AssetPriceHistoryItem(tradeDate, close));
+                    items.add(new AssetCandleHistoryItem(tradeDate, open, high, low, close));
                 }
 
-                items.sort(Comparator.comparing(AssetPriceHistoryItem::tradeDate));
+                items.sort(Comparator.comparing(AssetCandleHistoryItem::tradeDate));
                 return items;
             } catch (IOException | RestClientException ex) {
                 throw new TwelveDataLookupException("Failed to fetch Twelve Data history for symbol: " + symbol, ex);

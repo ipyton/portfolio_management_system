@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.user.entity.UserEntity;
 import com.noah.portfolio.user.repository.UserRepository;
 
@@ -26,48 +27,59 @@ import com.noah.portfolio.user.repository.UserRepository;
 public class CashAccountService {
 
     private static final int SCALE = 6;
+    private static final String SETTLEMENT_CURRENCY = "USD";
 
     private final UserRepository userRepository;
     private final CashAccountRepository cashAccountRepository;
     private final CashTransactionRepository cashTransactionRepository;
+    private final FxRateService fxRateService;
 
     public CashAccountService(
             UserRepository userRepository,
             CashAccountRepository cashAccountRepository,
-            CashTransactionRepository cashTransactionRepository
+            CashTransactionRepository cashTransactionRepository,
+            FxRateService fxRateService
     ) {
         this.userRepository = userRepository;
         this.cashAccountRepository = cashAccountRepository;
         this.cashTransactionRepository = cashTransactionRepository;
+        this.fxRateService = fxRateService;
     }
 
     public CashAccountTransferResponse mockDeposit(CashAccountTransferRequest request) {
         UserEntity user = requireUser(request.userId());
-        String currency = normalizeCurrency(request.currency());
+        String sourceCurrency = normalizeCurrency(request.currency());
         BigDecimal amount = normalize(request.amount());
+        BigDecimal settledAmount = convertToSettlementAmount(amount, sourceCurrency);
         String bizId = requireBizId(request.bizId());
         CashTransactionEntity existing = cashTransactionRepository.findByBizId(bizId).orElse(null);
         if (existing != null) {
-            validateExistingCashTransaction(existing, user.getId(), currency, CashTransactionType.DEPOSIT, amount);
+            validateExistingCashTransaction(
+                    existing,
+                    user.getId(),
+                    SETTLEMENT_CURRENCY,
+                    CashTransactionType.DEPOSIT,
+                    settledAmount
+            );
             return toTransferResponse(existing, true);
         }
 
-        CashAccountEntity account = findOrCreateCashAccount(user, currency);
+        CashAccountEntity account = findOrCreateCashAccount(user, SETTLEMENT_CURRENCY);
         BigDecimal balanceBefore = normalize(account.getBalance());
         BigDecimal availableBefore = normalize(account.getAvailableBalance());
         BigDecimal frozenBefore = normalize(account.getFrozenBalance());
-        BigDecimal balanceAfter = normalize(balanceBefore.add(amount));
-        BigDecimal availableAfter = normalize(availableBefore.add(amount));
+        BigDecimal balanceAfter = normalize(balanceBefore.add(settledAmount));
+        BigDecimal availableAfter = normalize(availableBefore.add(settledAmount));
 
         account.setBalances(availableAfter, frozenBefore);
         cashAccountRepository.save(account);
         CashTransactionEntity tx = cashTransactionRepository.save(new CashTransactionEntity(
                 bizId,
                 user,
-                currency,
+                SETTLEMENT_CURRENCY,
                 CashTransactionType.DEPOSIT,
                 OperationStatus.SUCCESS,
-                amount,
+                settledAmount,
                 balanceAfter,
                 availableAfter,
                 frozenBefore,
@@ -80,35 +92,42 @@ public class CashAccountService {
 
     public CashAccountTransferResponse mockWithdraw(CashAccountTransferRequest request) {
         UserEntity user = requireUser(request.userId());
-        String currency = normalizeCurrency(request.currency());
+        String sourceCurrency = normalizeCurrency(request.currency());
         BigDecimal amount = normalize(request.amount());
+        BigDecimal settledAmount = convertToSettlementAmount(amount, sourceCurrency);
         String bizId = requireBizId(request.bizId());
         CashTransactionEntity existing = cashTransactionRepository.findByBizId(bizId).orElse(null);
         if (existing != null) {
-            validateExistingCashTransaction(existing, user.getId(), currency, CashTransactionType.WITHDRAW, amount);
+            validateExistingCashTransaction(
+                    existing,
+                    user.getId(),
+                    SETTLEMENT_CURRENCY,
+                    CashTransactionType.WITHDRAW,
+                    settledAmount
+            );
             return toTransferResponse(existing, true);
         }
 
-        CashAccountEntity account = findOrCreateCashAccount(user, currency);
+        CashAccountEntity account = findOrCreateCashAccount(user, SETTLEMENT_CURRENCY);
         BigDecimal balanceBefore = normalize(account.getBalance());
         BigDecimal availableBefore = normalize(account.getAvailableBalance());
         BigDecimal frozenBefore = normalize(account.getFrozenBalance());
 
-        if (availableBefore.compareTo(amount) < 0) {
+        if (availableBefore.compareTo(settledAmount) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient cash balance.");
         }
 
-        BigDecimal balanceAfter = normalize(balanceBefore.subtract(amount));
-        BigDecimal availableAfter = normalize(availableBefore.subtract(amount));
+        BigDecimal balanceAfter = normalize(balanceBefore.subtract(settledAmount));
+        BigDecimal availableAfter = normalize(availableBefore.subtract(settledAmount));
         account.setBalances(availableAfter, frozenBefore);
         cashAccountRepository.save(account);
         CashTransactionEntity tx = cashTransactionRepository.save(new CashTransactionEntity(
                 bizId,
                 user,
-                currency,
+                SETTLEMENT_CURRENCY,
                 CashTransactionType.WITHDRAW,
                 OperationStatus.SUCCESS,
-                amount.negate(),
+                settledAmount.negate(),
                 balanceAfter,
                 availableAfter,
                 frozenBefore,
@@ -254,5 +273,17 @@ public class CashAccountService {
 
     private String resolveNote(String note) {
         return StringUtils.hasText(note) ? note.trim() : null;
+    }
+
+    private BigDecimal convertToSettlementAmount(BigDecimal amount, String sourceCurrency) {
+        if (SETTLEMENT_CURRENCY.equals(sourceCurrency)) {
+            return normalize(amount);
+        }
+        return fxRateService.convert(amount, sourceCurrency, SETTLEMENT_CURRENCY)
+                .map(this::normalize)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "FX rate unavailable for " + sourceCurrency + " to " + SETTLEMENT_CURRENCY + "."
+                ));
     }
 }

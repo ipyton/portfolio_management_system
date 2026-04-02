@@ -1,4 +1,5 @@
 import React from "react";
+import LoadingInline from "../../../components/LoadingInline";
 import { formatCurrency } from "../../../lib/api";
 
 function fmtCurrency(value) {
@@ -137,7 +138,7 @@ export default function HoldingsTable({
       {holdings.length === 0 && (
         <p style={{ margin: "10px 0 0", color: "var(--muted)", fontSize: "0.85rem" }}>
           {isLoading
-            ? "Loading live holdings data..."
+            ? <LoadingInline label="Loading live holdings data..." size="xs" tone="muted" />
             : dataUnavailable
               ? "Live holdings data is unavailable right now."
               : "No holdings data available."}

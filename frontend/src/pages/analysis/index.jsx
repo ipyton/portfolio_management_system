@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import LoadingInline from "../../components/LoadingInline";
 import {
   apiFetch,
   classForDelta,
@@ -41,6 +42,7 @@ const BACKTEST_WINDOWS = [30, 90, 180, 365];
 const SIMULATION_STEPS = [90, 126, 252, 365];
 const SIMULATION_PATHS = [200, 500, 1000];
 const NUM_RANDOM_PORTFOLIOS = 10000;
+const TRADING_DAYS_PER_YEAR = 252;
 
 function EmptyState({ title, description }) {
   return (
@@ -370,11 +372,15 @@ function SimulationChart({ meanPath, samplePaths }) {
         })}
         {xTickIndexes.map((index) => {
           const x = mapX(index);
+          const tickPoint = normalizedMeanPath[index];
+          const tickStep = Number.isFinite(Number(tickPoint?.step))
+            ? Number(tickPoint.step)
+            : index;
           return (
             <g key={`sim-x-${index}`}>
               <line x1={x} y1={margin.top} x2={x} y2={height - margin.bottom} className="chart-grid-line" />
               <text x={x} y={height - margin.bottom + 14} textAnchor="middle" className="chart-axis-text">
-                {(Number(normalizedMeanPath[index]?.time || 0) * 100).toFixed(0)}%
+                {tickStep}
               </text>
             </g>
           );
@@ -407,7 +413,7 @@ function SimulationChart({ meanPath, samplePaths }) {
               chartWidth={width}
               chartHeight={height}
               lines={[
-                `Step ${hoveredPoint.step}`,
+                `Day ${hoveredPoint.step}`,
                 `Value ${(Number(hoveredPoint.value) || 0).toFixed(4)}`,
                 `Return ${formatSignedPercent(hoverReturn || 0)}`,
               ]}
@@ -1130,7 +1136,9 @@ export default function AnalysisPage({ meta }) {
 
       const totalReturn = Number(curve[curve.length - 1].nav) / Number(curve[0].nav) - 1;
       const annualizedReturn =
-        curve.length > 1 ? (1 + totalReturn) ** (365 / (curve.length - 1)) - 1 : totalReturn;
+        curve.length > 1
+          ? (1 + totalReturn) ** (TRADING_DAYS_PER_YEAR / (curve.length - 1)) - 1
+          : totalReturn;
       const maxDrawdown = computeMaxDrawdown(curve);
 
       const assetReturns = historyList
@@ -1341,7 +1349,9 @@ export default function AnalysisPage({ meta }) {
               disabled={!profile || recommendationLoading}
               onClick={generateRecommendations}
             >
-              {recommendationLoading ? "Refreshing..." : "Refresh Suggestions"}
+              {recommendationLoading
+                ? <LoadingInline label="Refreshing..." size="xs" tone="inverted" />
+                : "Refresh Suggestions"}
             </button>
           </div>
         </div>
@@ -1371,6 +1381,11 @@ export default function AnalysisPage({ meta }) {
                 title="Suggestions unavailable"
                 description="Select a profile to auto-generate."
               />
+            ) : recommendationLoading && !recommendations.length ? (
+              <EmptyState
+                title="Refreshing suggestions"
+                description={<LoadingInline label="Loading recommendation list..." size="xs" tone="muted" />}
+              />
             ) : !recommendations.length ? (
               <EmptyState
                 title="No recommendations yet"
@@ -1394,7 +1409,7 @@ export default function AnalysisPage({ meta }) {
                         <p>{item.name}</p>
                       </div>
                       <div>
-                        <strong>{added ? "Added" : `${Math.round((item.targetWeight || 0) * 100)}%`}</strong>
+                        <strong>{added ? "Added" : formatPercent(item.targetWeight || 0, 1)}</strong>
                         <p>{added ? "In basket" : "Weight"}</p>
                       </div>
                     </button>
@@ -1406,7 +1421,11 @@ export default function AnalysisPage({ meta }) {
             <div className="search-results">
               <div className="card-head">
                 <span>Search & Add</span>
-                <strong>{searching ? "..." : suggestions.length}</strong>
+                <strong>
+                  {searching
+                    ? <LoadingInline label="Searching..." size="xs" tone="muted" />
+                    : suggestions.length}
+                </strong>
               </div>
               <label className="watchlist-search">
                 <input
@@ -1424,7 +1443,7 @@ export default function AnalysisPage({ meta }) {
               ) : searching ? (
                 <EmptyState
                   title="Searching"
-                  description="Loading suggestions..."
+                  description={<LoadingInline label="Loading suggestions..." size="xs" tone="muted" />}
                 />
               ) : !suggestions.length ? (
                 <EmptyState
@@ -1492,7 +1511,7 @@ export default function AnalysisPage({ meta }) {
                         <p>{item.name || "Unnamed asset"}</p>
                       </div>
                       <div className="analysis-basket-meta">
-                        <span>{Math.round(item.weight * 100)}%</span>
+                        <span>{formatPercent(item.weight, 1)}</span>
                         <button
                           type="button"
                           className="analysis-remove"
@@ -1557,7 +1576,9 @@ export default function AnalysisPage({ meta }) {
                     onClick={runBacktest}
                     disabled={!normalizedBasket.length || backtestLoading}
                   >
-                    {backtestLoading ? "Running..." : "Run Backtest"}
+                    {backtestLoading
+                      ? <LoadingInline label="Running..." size="xs" tone="inverted" />
+                      : "Run Backtest"}
                   </button>
                 </div>
 
@@ -1624,7 +1645,7 @@ export default function AnalysisPage({ meta }) {
 
                 <div className="analysis-controls">
                   <label>
-                    Steps
+                    Horizon (days)
                     <select
                       value={simulationSteps}
                       onChange={(event) => setSimulationSteps(Number(event.target.value))}
@@ -1632,7 +1653,7 @@ export default function AnalysisPage({ meta }) {
                     >
                       {SIMULATION_STEPS.map((steps) => (
                         <option key={steps} value={steps}>
-                          {steps} steps
+                          {steps} days
                         </option>
                       ))}
                     </select>
@@ -1657,7 +1678,9 @@ export default function AnalysisPage({ meta }) {
                     onClick={runWienerSimulation}
                     disabled={!normalizedBasket.length || simulationLoading}
                   >
-                    {simulationLoading ? "Simulating..." : "Run Simulation"}
+                    {simulationLoading
+                      ? <LoadingInline label="Simulating..." size="xs" tone="inverted" />
+                      : "Run Simulation"}
                   </button>
                 </div>
 
@@ -1728,7 +1751,9 @@ export default function AnalysisPage({ meta }) {
                     onClick={runSharpeOptimization}
                     disabled={!normalizedBasket.length || sharpeLoading}
                   >
-                    {sharpeLoading ? "Optimizing..." : "Run Optimization"}
+                    {sharpeLoading
+                      ? <LoadingInline label="Optimizing..." size="xs" tone="inverted" />
+                      : "Run Optimization"}
                   </button>
                 </div>
 

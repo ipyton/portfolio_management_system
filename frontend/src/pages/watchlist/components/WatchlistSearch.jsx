@@ -1,7 +1,9 @@
 import React from "react";
+import LoadingInline from "../../../components/LoadingInline";
 
 export default function WatchlistSearch({
   searchTerm,
+  isSearching,
   onSearchChange,
   showSuggestions,
   suggestionRows,
@@ -20,19 +22,30 @@ export default function WatchlistSearch({
         onFocus={onFocus}
         onBlur={onBlur}
       />
-      {showSuggestions && suggestionRows.length > 0 && (
+      {isSearching && (
+        <span className="watchlist-search-loading" aria-hidden="true">
+          <LoadingInline size="xs" tone="muted" />
+        </span>
+      )}
+      {showSuggestions && (isSearching || suggestionRows.length > 0) && (
         <div className="search-suggestions" role="listbox">
-          {suggestionRows.map((row) => (
-            <button
-              key={`${row.symbol}-${row.assetId ?? "remote"}`}
-              type="button"
-              className="search-suggestion"
-              onClick={() => onSuggestionSelect(row)}
-            >
-              <span>{row.symbol}</span>
-              <span>{row.type}</span>
-            </button>
-          ))}
+          {isSearching ? (
+            <div className="search-suggestion search-suggestion-loading">
+              <LoadingInline label="Searching..." size="xs" tone="muted" />
+            </div>
+          ) : (
+            suggestionRows.map((row) => (
+              <button
+                key={`${row.symbol}-${row.assetId ?? "remote"}`}
+                type="button"
+                className="search-suggestion"
+                onClick={() => onSuggestionSelect(row)}
+              >
+                <span>{row.symbol}</span>
+                <span>{row.type}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

@@ -23,6 +23,7 @@ import com.noah.portfolio.asset.model.AssetPriceWindowSnapshot;
 import com.noah.portfolio.asset.repository.AssetRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
 import com.noah.portfolio.asset.model.AssetType;
+import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.user.entity.UserEntity;
 import com.noah.portfolio.user.repository.UserRepository;
 
@@ -31,6 +32,7 @@ import com.noah.portfolio.user.repository.UserRepository;
 public class TradingService {
 
     private static final int SCALE = 6;
+    private static final String SETTLEMENT_CURRENCY = "USD";
 
     private final UserRepository userRepository;
     private final AssetRepository assetRepository;
@@ -39,6 +41,7 @@ public class TradingService {
     private final CashAccountRepository cashAccountRepository;
     private final CashTransactionRepository cashTransactionRepository;
     private final AssetSearchDataRepository assetSearchDataRepository;
+    private final FxRateService fxRateService;
 
     public TradingService(
             UserRepository userRepository,
@@ -47,7 +50,8 @@ public class TradingService {
             TradeHistoryRepository tradeHistoryRepository,
             CashAccountRepository cashAccountRepository,
             CashTransactionRepository cashTransactionRepository,
-            AssetSearchDataRepository assetSearchDataRepository
+            AssetSearchDataRepository assetSearchDataRepository,
+            FxRateService fxRateService
     ) {
         this.userRepository = userRepository;
         this.assetRepository = assetRepository;
@@ -56,6 +60,7 @@ public class TradingService {
         this.cashAccountRepository = cashAccountRepository;
         this.cashTransactionRepository = cashTransactionRepository;
         this.assetSearchDataRepository = assetSearchDataRepository;
+        this.fxRateService = fxRateService;
     }
 
     public TradeResponse buy(TradeRequest request) {
@@ -73,10 +78,11 @@ public class TradingService {
         BigDecimal price = normalize(request.price());
         BigDecimal amount = normalize(quantity.multiply(price));
         BigDecimal totalCost = normalize(amount.add(fee));
+        BigDecimal settledTotalCost = convertToSettlementAmount(totalCost, asset.getCurrency());
 
-        CashAccountEntity cashAccount = findOrCreateCashAccount(user, asset.getCurrency());
+        CashAccountEntity cashAccount = findOrCreateCashAccount(user, SETTLEMENT_CURRENCY);
 
-        if (cashAccount.getAvailableBalance().compareTo(totalCost) < 0) {
+        if (cashAccount.getAvailableBalance().compareTo(settledTotalCost) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient cash balance.");
         }
 
@@ -94,7 +100,7 @@ public class TradingService {
                 : normalize(newCostBasis.divide(newQuantity, SCALE, RoundingMode.HALF_UP)));
         holding = holdingRepository.save(holding);
 
-        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().subtract(totalCost));
+        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().subtract(settledTotalCost));
         BigDecimal frozenAfter = normalize(cashAccount.getFrozenBalance());
         cashAccount.setBalances(availableAfter, frozenAfter);
         cashAccountRepository.save(cashAccount);
@@ -116,10 +122,10 @@ public class TradingService {
         cashTransactionRepository.save(new CashTransactionEntity(
                 bizId,
                 user,
-                asset.getCurrency(),
+                SETTLEMENT_CURRENCY,
                 CashTransactionType.BUY,
                 OperationStatus.SUCCESS,
-                totalCost.negate(),
+                settledTotalCost.negate(),
                 cashAccount.getBalance(),
                 cashAccount.getAvailableBalance(),
                 cashAccount.getFrozenBalance(),
@@ -145,6 +151,7 @@ public class TradingService {
         BigDecimal price = normalize(request.price());
         BigDecimal amount = normalize(quantity.multiply(price));
         BigDecimal netProceeds = normalize(amount.subtract(fee));
+        BigDecimal settledNetProceeds = convertToSettlementAmount(netProceeds, asset.getCurrency());
 
         HoldingEntity holding = holdingRepository.findByUserIdAndAssetId(request.userId(), request.assetId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Holding not found."));
@@ -153,7 +160,7 @@ public class TradingService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient holding quantity.");
         }
 
-        CashAccountEntity cashAccount = findOrCreateCashAccount(user, asset.getCurrency());
+        CashAccountEntity cashAccount = findOrCreateCashAccount(user, SETTLEMENT_CURRENCY);
 
         BigDecimal newQuantity = normalize(holding.getQuantity().subtract(quantity));
         holding.setQuantity(newQuantity);
@@ -162,7 +169,7 @@ public class TradingService {
         }
         holding = holdingRepository.save(holding);
 
-        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().add(netProceeds));
+        BigDecimal availableAfter = normalize(cashAccount.getAvailableBalance().add(settledNetProceeds));
         BigDecimal frozenAfter = normalize(cashAccount.getFrozenBalance());
         cashAccount.setBalances(availableAfter, frozenAfter);
         cashAccountRepository.save(cashAccount);
@@ -184,10 +191,10 @@ public class TradingService {
         cashTransactionRepository.save(new CashTransactionEntity(
                 bizId,
                 user,
-                asset.getCurrency(),
+                SETTLEMENT_CURRENCY,
                 CashTransactionType.SELL,
                 OperationStatus.SUCCESS,
-                netProceeds,
+                settledNetProceeds,
                 cashAccount.getBalance(),
                 cashAccount.getAvailableBalance(),
                 cashAccount.getFrozenBalance(),
@@ -341,13 +348,16 @@ public class TradingService {
         BigDecimal price = normalize(request.price());
         BigDecimal fee = normalizeFee(request.fee());
         BigDecimal amount = normalize(quantity.multiply(price));
-        BigDecimal grossCashImpact = tradeType == TradeType.BUY
-                ? normalize(amount.add(fee)).negate()
+        BigDecimal tradeCashInAssetCurrency = tradeType == TradeType.BUY
+                ? normalize(amount.add(fee))
                 : normalize(amount.subtract(fee));
+        BigDecimal grossCashImpact = tradeType == TradeType.BUY
+                ? convertToSettlementAmount(tradeCashInAssetCurrency, asset.getCurrency()).negate()
+                : convertToSettlementAmount(tradeCashInAssetCurrency, asset.getCurrency());
 
         String message = tradeType == TradeType.BUY
-                ? "Preview only. Buying will reduce cash by amount plus fee."
-                : "Preview only. Selling will increase cash by amount minus fee.";
+                ? "Preview only. Buying will reduce USD cash by converted amount plus fee."
+                : "Preview only. Selling will increase USD cash by converted amount minus fee.";
 
         return new TradePreviewResponse(
                 tradeType.name(),
@@ -358,9 +368,22 @@ public class TradingService {
                 amount,
                 fee,
                 grossCashImpact,
-                asset.getCurrency(),
+                SETTLEMENT_CURRENCY,
                 message
         );
+    }
+
+    private BigDecimal convertToSettlementAmount(BigDecimal amount, String sourceCurrency) {
+        String normalizedSourceCurrency = sourceCurrency == null ? null : sourceCurrency.trim().toUpperCase();
+        if (SETTLEMENT_CURRENCY.equals(normalizedSourceCurrency)) {
+            return normalize(amount);
+        }
+        return fxRateService.convert(amount, normalizedSourceCurrency, SETTLEMENT_CURRENCY)
+                .map(this::normalize)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "FX rate unavailable for " + normalizedSourceCurrency + " to " + SETTLEMENT_CURRENCY + "."
+                ));
     }
 
     private TradeResponse toTradeResponse(TradeHistoryEntity trade) {

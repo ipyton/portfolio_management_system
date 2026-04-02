@@ -37,6 +37,19 @@ public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
             @Param("refreshedAt") Instant refreshedAt
     );
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AssetEntity a
+            set a.exchange = :exchange,
+                a.region = :region
+            where a.id = :assetId
+            """)
+    int updateVenueMetadata(
+            @Param("assetId") Long assetId,
+            @Param("exchange") String exchange,
+            @Param("region") String region
+    );
+
     @Query("""
             select distinct a
             from AssetEntity a

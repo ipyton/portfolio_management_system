@@ -78,6 +78,19 @@ CREATE TABLE asset_price_daily (
     CONSTRAINT fk_price_asset FOREIGN KEY (asset_id) REFERENCES assets (id)
 );
 
+CREATE TABLE asset_candle_cache (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    symbol VARCHAR(30) NOT NULL,
+    candle_interval VARCHAR(10) NOT NULL,
+    trade_date DATE NOT NULL,
+    open DECIMAL(18, 6) NOT NULL,
+    high DECIMAL(18, 6) NOT NULL,
+    low DECIMAL(18, 6) NOT NULL,
+    close DECIMAL(18, 6) NOT NULL,
+    source VARCHAR(30),
+    updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE fx_rate_latest (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     base_currency VARCHAR(10) NOT NULL,

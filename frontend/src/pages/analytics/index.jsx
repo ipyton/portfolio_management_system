@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import LoadingInline from "../../components/LoadingInline";
 import {
   DEFAULT_USER_ID,
   apiFetch,
@@ -82,7 +83,13 @@ export default function AnalyticsPage({ label, meta }) {
           </div>
           <div className="hero-status-card">
             <span>Session</span>
-            <strong>{error ? "Request failed" : loading ? "Requesting data" : "Dashboard ready"}</strong>
+            <strong>
+              {error
+                ? "Request failed"
+                : loading
+                  ? <LoadingInline label="Requesting data" size="xs" />
+                  : "Dashboard ready"}
+            </strong>
             <p>
               {loading
                 ? "Loading portfolio summary from the backend."

@@ -19,6 +19,10 @@
   --accent: #79a8ff;
   --accent-deep: #4f7bff;
   --accent-soft: rgba(93, 125, 255, 0.14);
+  --spinner-track: rgba(109, 120, 151, 0.28);
+  --spinner-head: #79a8ff;
+  --spinner-track-inverted: rgba(255, 255, 255, 0.3);
+  --spinner-head-inverted: #ffffff;
   --positive: #7bd88f;
   --positive-soft: rgba(72, 187, 120, 0.16);
   --ambient-a-bg: rgba(79, 123, 255, 0.11);
@@ -110,6 +114,53 @@ body {
 
 button {
   font: inherit;
+}
+
+.loading-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid var(--spinner-track);
+  border-top-color: var(--spinner-head);
+  animation: loading-spinner-rotate 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+.loading-spinner--xs {
+  width: 12px;
+  height: 12px;
+}
+
+.loading-spinner--sm {
+  width: 16px;
+  height: 16px;
+}
+
+.loading-spinner--md {
+  width: 20px;
+  height: 20px;
+}
+
+.loading-spinner--inverted {
+  border-color: var(--spinner-track-inverted);
+  border-top-color: var(--spinner-head-inverted);
+}
+
+.loading-spinner--muted {
+  border-color: rgba(122, 135, 170, 0.3);
+  border-top-color: var(--muted);
+}
+
+@keyframes loading-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 #root {

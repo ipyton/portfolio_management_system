@@ -32,6 +32,7 @@ import org.springframework.util.StringUtils;
 import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.asset.service.AssetMetadataEnrichmentService;
+import com.noah.portfolio.common.RegionCodeNormalizer;
 import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.scheduler.service.PortfolioNavSnapshotService;
 import com.noah.portfolio.trading.entity.HoldingEntity;
@@ -861,7 +862,10 @@ public class PortfolioAnalyticsService {
                 .map(point -> new BenchmarkPricePoint(
                         point.getSymbol(),
                         point.getName(),
-                        textOrDefault(point.getRegion(), "UNKNOWN"),
+                        textOrDefault(
+                                RegionCodeNormalizer.normalize(point.getRegion()),
+                                textOrDefault(inferRegionFromSymbol(point.getSymbol()), "UNKNOWN")
+                        ),
                         point.getTradeDate(),
                         decimalToDouble(point.getClose())
                 ))
@@ -1228,15 +1232,16 @@ public class PortfolioAnalyticsService {
     }
 
     private String resolveDominantRegion(List<HoldingSnapshot> holdings, String reportingCurrency) {
-        return holdings.stream()
+        String dominantRegion = holdings.stream()
                 .collect(Collectors.groupingBy(
-                        HoldingSnapshot::region,
+                        holding -> textOrDefault(RegionCodeNormalizer.normalize(holding.region()), "US"),
                         Collectors.summingDouble(holding -> nullableToZero(holdingMarketValue(holding, reportingCurrency)))
                 ))
                 .entrySet().stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("US");
+        return textOrDefault(RegionCodeNormalizer.normalize(dominantRegion), "US");
     }
 
     private String resolveIndustryBucket(HoldingSnapshot holding) {
@@ -1266,15 +1271,17 @@ public class PortfolioAnalyticsService {
     }
 
     private String resolveRiskFreeCurrency(String dominantRegion) {
-        return switch (dominantRegion) {
+        String normalizedRegion = textOrDefault(RegionCodeNormalizer.normalize(dominantRegion), "US");
+        return switch (normalizedRegion) {
             case "CN" -> "CNY";
             default -> "USD";
         };
     }
 
     private String resolveHoldingRegion(String rawRegion, String symbol, String exchange) {
-        if (StringUtils.hasText(rawRegion) && !"UNKNOWN".equalsIgnoreCase(rawRegion.trim())) {
-            return rawRegion.trim().toUpperCase(Locale.ROOT);
+        String normalizedRawRegion = RegionCodeNormalizer.normalize(rawRegion);
+        if (StringUtils.hasText(normalizedRawRegion)) {
+            return normalizedRawRegion;
         }
         String inferredBySymbol = inferRegionFromSymbol(symbol);
         if (StringUtils.hasText(inferredBySymbol)) {
@@ -1344,7 +1351,8 @@ public class PortfolioAnalyticsService {
             return requestedBenchmarkSymbol;
         }
 
-        String regionDefault = switch (dominantRegion) {
+        String normalizedRegion = textOrDefault(RegionCodeNormalizer.normalize(dominantRegion), "US");
+        String regionDefault = switch (normalizedRegion) {
             case "CN" -> "000300.SH";
             case "HK" -> "HSI";
             default -> "SPX";
