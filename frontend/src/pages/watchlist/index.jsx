@@ -748,7 +748,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           price: Number(normalizedPrice.toFixed(6)),
           fee: 0,
           bizId,
-          note: `Submitted from watchlist (${tradeModal.type})`,
+          note: tradeModal.type,
         },
       });
 

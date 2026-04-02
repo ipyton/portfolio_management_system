@@ -58,11 +58,24 @@ function normalizeCurrency(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function simplifyTradeNote(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) {
+    return "-";
+  }
+  if (text.includes("sell")) {
+    return "sell";
+  }
+  if (text.includes("buy")) {
+    return "buy";
+  }
+  return "-";
+}
+
 export default function CashPage({ userId = DEFAULT_USER_ID }) {
   const [balances, setBalances] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -109,7 +122,6 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
         if (fxResponse) {
           setFxRateMap(buildFxRateMap(fxResponse, "USD"));
         }
-        setLastUpdated(new Date().toISOString());
       } catch (requestError) {
         setError(requestError?.message || "Failed to load cash account data.");
       } finally {
@@ -181,32 +193,6 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
 
   return (
     <div className="cash-page">
-      <section className="hero-panel cash-hero-panel">
-        <p className="eyebrow">Cash Simulation</p>
-        <div className="cash-hero-headline-row">
-          <h1>Mock Deposit / Withdraw</h1>
-          <button
-            type="button"
-            className="cash-refresh-btn"
-            onClick={() => refreshData(currencyFilter)}
-            disabled={loading || submitting}
-          >
-            {loading ? <LoadingInline label="Refreshing..." size="xs" /> : "Refresh"}
-          </button>
-        </div>
-        <p className="hero-copy cash-hero-copy">
-          Use backend mock transfer APIs to top up or withdraw cash by currency.
-        </p>
-        <div className="cash-status-row">
-          <span className={`cash-status-pill${loading ? " loading" : ""}`}>
-            {loading ? <LoadingInline label="Syncing data" size="xs" /> : "Data synced"}
-          </span>
-          <span className="cash-status-time">
-            Last updated: {lastUpdated ? formatDateTime(lastUpdated) : "N/A"}
-          </span>
-        </div>
-      </section>
-
       {(error || success) && (
         <section className="feature-card cash-message-card" aria-live="polite">
           {error ? <p className="cash-message error">{error}</p> : null}
@@ -358,7 +344,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                         <td>{formatUsdValue(item.availableBalanceAfter, item.currency)}</td>
                         <td>{item.status || "N/A"}</td>
                         <td>{item.bizId || "N/A"}</td>
-                        <td>{item.note || "-"}</td>
+                        <td>{simplifyTradeNote(item.note)}</td>
                       </tr>
                     );
                   })
