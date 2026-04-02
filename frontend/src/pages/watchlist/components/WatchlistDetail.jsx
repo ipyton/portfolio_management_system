@@ -279,6 +279,7 @@ export default function WatchlistDetail({
               <Tooltip
                 formatter={(value) => [formatCurrency(value, "USD"), "Price (USD)"]}
                 labelFormatter={(label) => `Date: ${label}`}
+                isAnimationActive={false}
                 contentStyle={{
                   background: chartPalette.tooltipBg,
                   border: `1px solid ${chartPalette.tooltipBorder}`,
@@ -293,6 +294,7 @@ export default function WatchlistDetail({
                 dataKey="price"
                 stroke={chartPalette.line}
                 strokeWidth={3}
+                isAnimationActive={false}
                 activeDot={{
                   r: 4,
                   fill: chartPalette.line,

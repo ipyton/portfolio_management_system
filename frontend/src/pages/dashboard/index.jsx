@@ -6,7 +6,7 @@ import {
   formatPercent,
   formatSignedPercent,
 } from "../../lib/api";
-import HoldingsTable, { HOLDING_COLUMN_OPTIONS } from "./components/HoldingsTable";
+import HoldingsTable from "./components/HoldingsTable";
 import IntroCard from "./components/IntroCard";
 import MetricsSlider from "./components/MetricsSlider";
 import TradeList from "./components/TradeList";
@@ -660,7 +660,6 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
   const [dashboardPayload, setDashboardPayload] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(true);
   const [liveDataUnavailable, setLiveDataUnavailable] = useState(false);
-  const [selectedColumn, setSelectedColumn] = useState(HOLDING_COLUMN_OPTIONS[0].key);
 
   const categories = useMemo(
     () => buildLiveCategories(dashboardPayload),
@@ -901,8 +900,6 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
             holdings={enrichedHoldings}
             selectedSymbol={selectedSymbol}
             onSelectSymbol={setSelectedSymbol}
-            selectedColumn={selectedColumn}
-            onColumnChange={setSelectedColumn}
             isLoading={isLiveLoading}
             dataUnavailable={liveDataUnavailable}
             minRows={5}
