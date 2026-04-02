@@ -68,6 +68,17 @@ public interface AssetPriceDailyRepository extends JpaRepository<AssetPriceDaily
             @Param("volume") Long volume
     );
 
+    @Modifying
+    @Query(value = """
+            insert into asset_price_daily (asset_id, trade_date, close)
+            values (:assetId, :tradeDate, :close)
+            """, nativeQuery = true)
+    int insertPriceCloseOnly(
+            @Param("assetId") Long assetId,
+            @Param("tradeDate") LocalDate tradeDate,
+            @Param("close") BigDecimal close
+    );
+
     @Query("""
             select p.asset.id as assetId, p.close as close, p.tradeDate as tradeDate
             from AssetPriceDailyEntity p

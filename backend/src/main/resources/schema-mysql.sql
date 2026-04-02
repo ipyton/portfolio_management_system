@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS assets (
     exchange VARCHAR(20),
     region VARCHAR(50),
     is_benchmark TINYINT(1) NOT NULL DEFAULT 0,
+    last_price_refreshed_at TIMESTAMP NULL,
     UNIQUE KEY uq_symbol_type_exchange (symbol, asset_type, exchange)
 );
 

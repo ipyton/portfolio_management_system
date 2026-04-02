@@ -120,6 +120,35 @@ export async function apiFetch(path, options = {}) {
   return payload;
 }
 
+export async function fetchCashBalances(userId = DEFAULT_USER_ID) {
+  return apiFetch(`/api/cash-accounts?userId=${encodeURIComponent(userId)}`);
+}
+
+export async function fetchCashTransactions({
+  userId = DEFAULT_USER_ID,
+  currency,
+} = {}) {
+  const params = new URLSearchParams({ userId: String(userId) });
+  if (currency && String(currency).trim()) {
+    params.set("currency", String(currency).trim().toUpperCase());
+  }
+  return apiFetch(`/api/cash-accounts/transactions?${params.toString()}`);
+}
+
+export async function mockCashDeposit(requestBody) {
+  return apiFetch("/api/cash-accounts/deposit", {
+    method: "POST",
+    body: requestBody,
+  });
+}
+
+export async function mockCashWithdraw(requestBody) {
+  return apiFetch("/api/cash-accounts/withdraw", {
+    method: "POST",
+    body: requestBody,
+  });
+}
+
 export function formatCurrency(value, currency = "USD") {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "N/A";

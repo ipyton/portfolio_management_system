@@ -8,6 +8,7 @@ import {
   verifyAuthPassword,
 } from "./lib/api";
 import AnalysisPage, { analysisPageMeta } from "./pages/analysis";
+import CashPage, { cashPageMeta } from "./pages/cash";
 import DashboardPage, { dashboardPageMeta } from "./pages/dashboard";
 import WatchlistPage, { watchlistPageMeta } from "./pages/watchlist";
 
@@ -21,6 +22,11 @@ const PAGES = {
     label: "Watchlist",
     meta: watchlistPageMeta,
     Component: WatchlistPage,
+  },
+  cash: {
+    label: "Cash",
+    meta: cashPageMeta,
+    Component: CashPage,
   },
   analysis: {
     label: "Analysis",
@@ -89,8 +95,7 @@ export default function App() {
     <div className="app-shell">
       <div className="ambient ambient-a" />
       <div className="ambient ambient-b" />
-      
-      /* The navigation bar we 
+
       <Topbar
         navItems={NAV_ITEMS}
         activePage={activePage}
@@ -153,8 +158,8 @@ export default function App() {
           )}
         </main>
       </div>
-      
-      <LangflowWidget />
+
+      <LangflowWidget themeMode={theme} />
     </div>
   );
 }

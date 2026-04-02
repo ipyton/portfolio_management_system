@@ -307,6 +307,36 @@ button {
   font-weight: 700;
 }
 
+.theme-icon-toggle {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.theme-icon {
+  font-size: 1.05rem;
+}
+
+.theme-icon-toggle:hover {
+  border-color: rgba(121, 168, 255, 0.42);
+  background: var(--breadcrumb-active-bg);
+}
+
+.theme-icon-toggle:focus-visible {
+  outline: 2px solid rgba(121, 168, 255, 0.72);
+  outline-offset: 2px;
+}
+
+:root[data-theme="light"] .theme-icon {
+  color: #111827;
+}
+
+:root:not([data-theme="light"]) .theme-icon {
+  color: #f4f7ff;
+}
+
 .theme-switch {
   margin: 0;
   color: var(--breadcrumb-text);

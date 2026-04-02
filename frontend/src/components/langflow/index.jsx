@@ -61,15 +61,339 @@ function parseJsonSafe(raw) {
   }
 }
 
-function AssistantChart({ option }) {
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mapMaybeArray(value, mapper) {
+  if (Array.isArray(value)) {
+    return value.map((item) => mapper(item));
+  }
+  return mapper(value);
+}
+
+function buildChartPalette(isDarkMode) {
+  if (isDarkMode) {
+    return {
+      text: "#eaf0ff",
+      muted: "#a6b2cd",
+      axisLine: "rgba(140, 158, 194, 0.62)",
+      splitLine: "rgba(121, 168, 255, 0.22)",
+      tooltipBg: "rgba(10, 13, 20, 0.96)",
+      tooltipBorder: "rgba(121, 168, 255, 0.34)",
+      series: ["#79a8ff", "#7bd88f", "#38bdf8", "#f59e0b", "#fb7185", "#c084fc", "#22d3ee"],
+    };
+  }
+
+  return {
+    text: "#1f2937",
+    muted: "#4b5563",
+    axisLine: "rgba(107, 114, 128, 0.55)",
+    splitLine: "rgba(148, 163, 184, 0.28)",
+    tooltipBg: "rgba(255, 255, 255, 0.97)",
+    tooltipBorder: "rgba(148, 163, 184, 0.4)",
+    series: ["#4f7bff", "#16a34a", "#0284c7", "#d97706", "#e11d48", "#7c3aed", "#0f766e"],
+  };
+}
+
+function parseColorToken(colorToken) {
+  if (typeof colorToken !== "string") return null;
+  const token = colorToken.trim().toLowerCase();
+  if (!token) return null;
+  if (token === "black") {
+    return { r: 0, g: 0, b: 0, a: 1 };
+  }
+
+  const hexMatch = token.match(/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    if (hex.length === 3 || hex.length === 4) {
+      const r = Number.parseInt(`${hex[0]}${hex[0]}`, 16);
+      const g = Number.parseInt(`${hex[1]}${hex[1]}`, 16);
+      const b = Number.parseInt(`${hex[2]}${hex[2]}`, 16);
+      const a = hex.length === 4 ? Number.parseInt(`${hex[3]}${hex[3]}`, 16) / 255 : 1;
+      return { r, g, b, a };
+    }
+    const r = Number.parseInt(hex.slice(0, 2), 16);
+    const g = Number.parseInt(hex.slice(2, 4), 16);
+    const b = Number.parseInt(hex.slice(4, 6), 16);
+    const a = hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1;
+    return { r, g, b, a };
+  }
+
+  const rgbMatch = token.match(/^rgba?\(([^)]+)\)$/);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(",").map((part) => part.trim());
+    if (parts.length < 3) return null;
+    const r = Number.parseFloat(parts[0]);
+    const g = Number.parseFloat(parts[1]);
+    const b = Number.parseFloat(parts[2]);
+    const a = parts.length >= 4 ? Number.parseFloat(parts[3]) : 1;
+    if (![r, g, b, a].every(Number.isFinite)) return null;
+    return { r, g, b, a };
+  }
+
+  return null;
+}
+
+function isTooDarkColor(colorToken) {
+  const parsed = parseColorToken(colorToken);
+  if (!parsed) return false;
+  if (parsed.a <= 0.05) return false;
+  const luminance = 0.2126 * parsed.r + 0.7152 * parsed.g + 0.0722 * parsed.b;
+  return luminance < 70;
+}
+
+function pickReadableColor(rawColor, fallbackColor, isDarkMode) {
+  if (!isDarkMode) return rawColor;
+  if (typeof rawColor !== "string" || !rawColor.trim()) return fallbackColor;
+  return isTooDarkColor(rawColor) ? fallbackColor : rawColor;
+}
+
+function applyColorListTheme(colors, palette, isDarkMode) {
+  if (!Array.isArray(colors) || colors.length === 0) {
+    return palette.series;
+  }
+  return colors.map((item, index) =>
+    pickReadableColor(item, palette.series[index % palette.series.length], isDarkMode),
+  );
+}
+
+function applyAxisTheme(axisOption, palette) {
+  return mapMaybeArray(axisOption, (axisItem) => {
+    if (!isPlainObject(axisItem)) return axisItem;
+
+    const axisLine = isPlainObject(axisItem.axisLine) ? axisItem.axisLine : {};
+    const axisTick = isPlainObject(axisItem.axisTick) ? axisItem.axisTick : {};
+    const splitLine = isPlainObject(axisItem.splitLine) ? axisItem.splitLine : {};
+
+    return {
+      ...axisItem,
+      axisLabel: {
+        ...(isPlainObject(axisItem.axisLabel) ? axisItem.axisLabel : {}),
+        color: palette.muted,
+      },
+      nameTextStyle: {
+        ...(isPlainObject(axisItem.nameTextStyle) ? axisItem.nameTextStyle : {}),
+        color: palette.text,
+      },
+      axisLine: {
+        ...axisLine,
+        lineStyle: {
+          ...(isPlainObject(axisLine.lineStyle) ? axisLine.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      axisTick: {
+        ...axisTick,
+        lineStyle: {
+          ...(isPlainObject(axisTick.lineStyle) ? axisTick.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      splitLine: {
+        ...splitLine,
+        lineStyle: {
+          ...(isPlainObject(splitLine.lineStyle) ? splitLine.lineStyle : {}),
+          color: palette.splitLine,
+        },
+      },
+    };
+  });
+}
+
+function applyLegendTheme(legendOption, palette) {
+  return mapMaybeArray(legendOption, (legendItem) => {
+    if (!isPlainObject(legendItem)) return legendItem;
+    return {
+      ...legendItem,
+      textStyle: {
+        ...(isPlainObject(legendItem.textStyle) ? legendItem.textStyle : {}),
+        color: palette.text,
+      },
+      inactiveColor: palette.muted,
+    };
+  });
+}
+
+function applyTitleTheme(titleOption, palette) {
+  return mapMaybeArray(titleOption, (titleItem) => {
+    if (!isPlainObject(titleItem)) return titleItem;
+    return {
+      ...titleItem,
+      textStyle: {
+        ...(isPlainObject(titleItem.textStyle) ? titleItem.textStyle : {}),
+        color: palette.text,
+      },
+      subtextStyle: {
+        ...(isPlainObject(titleItem.subtextStyle) ? titleItem.subtextStyle : {}),
+        color: palette.muted,
+      },
+    };
+  });
+}
+
+function applySeriesDataTheme(dataOption, palette, isDarkMode, seriesIndex) {
+  if (!Array.isArray(dataOption)) return dataOption;
+  return dataOption.map((dataItem, dataIndex) => {
+    if (!isPlainObject(dataItem)) return dataItem;
+    const fallbackColor = palette.series[(seriesIndex + dataIndex) % palette.series.length];
+    const itemStyle = isPlainObject(dataItem.itemStyle) ? dataItem.itemStyle : {};
+    const label = isPlainObject(dataItem.label) ? dataItem.label : {};
+    return {
+      ...dataItem,
+      color: pickReadableColor(dataItem.color, fallbackColor, isDarkMode),
+      itemStyle: {
+        ...itemStyle,
+        color: pickReadableColor(itemStyle.color, fallbackColor, isDarkMode),
+        borderColor: pickReadableColor(itemStyle.borderColor, fallbackColor, isDarkMode),
+      },
+      label: {
+        ...label,
+        color: palette.text,
+      },
+    };
+  });
+}
+
+function applySeriesTheme(seriesOption, palette, isDarkMode) {
+  if (!Array.isArray(seriesOption)) return seriesOption;
+  return seriesOption.map((seriesItem, seriesIndex) => {
+    if (!isPlainObject(seriesItem)) return seriesItem;
+
+    const label = isPlainObject(seriesItem.label) ? seriesItem.label : {};
+    const labelLine = isPlainObject(seriesItem.labelLine) ? seriesItem.labelLine : {};
+    const lineStyle = isPlainObject(seriesItem.lineStyle) ? seriesItem.lineStyle : {};
+    const itemStyle = isPlainObject(seriesItem.itemStyle) ? seriesItem.itemStyle : {};
+    const areaStyle = isPlainObject(seriesItem.areaStyle) ? seriesItem.areaStyle : {};
+    const fallbackColor = palette.series[seriesIndex % palette.series.length];
+
+    return {
+      ...seriesItem,
+      color: pickReadableColor(seriesItem.color, fallbackColor, isDarkMode),
+      label: {
+        ...label,
+        color: palette.text,
+      },
+      labelLine: {
+        ...labelLine,
+        lineStyle: {
+          ...(isPlainObject(labelLine.lineStyle) ? labelLine.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      lineStyle: {
+        ...lineStyle,
+        color: pickReadableColor(lineStyle.color, fallbackColor, isDarkMode),
+      },
+      itemStyle: {
+        ...itemStyle,
+        color: pickReadableColor(itemStyle.color, fallbackColor, isDarkMode),
+        borderColor: pickReadableColor(itemStyle.borderColor, fallbackColor, isDarkMode),
+      },
+      areaStyle: {
+        ...areaStyle,
+        color: pickReadableColor(areaStyle.color, fallbackColor, isDarkMode),
+      },
+      data: applySeriesDataTheme(seriesItem.data, palette, isDarkMode, seriesIndex),
+    };
+  });
+}
+
+function applyVisualMapTheme(visualMapOption, palette) {
+  return mapMaybeArray(visualMapOption, (visualMapItem) => {
+    if (!isPlainObject(visualMapItem)) return visualMapItem;
+    return {
+      ...visualMapItem,
+      textStyle: {
+        ...(isPlainObject(visualMapItem.textStyle) ? visualMapItem.textStyle : {}),
+        color: palette.text,
+      },
+    };
+  });
+}
+
+function createThemedChartOption(option, isDarkMode) {
+  if (!isPlainObject(option)) return option;
+
+  const palette = buildChartPalette(isDarkMode);
+  const tooltip = isPlainObject(option.tooltip) ? option.tooltip : {};
+  const axisPointer = isPlainObject(tooltip.axisPointer) ? tooltip.axisPointer : {};
+  const pointerLabel = isPlainObject(axisPointer.label) ? axisPointer.label : {};
+  const radar = isPlainObject(option.radar) ? option.radar : {};
+
+  return {
+    ...option,
+    darkMode: isDarkMode,
+    backgroundColor: "transparent",
+    color: applyColorListTheme(option.color, palette, isDarkMode),
+    textStyle: {
+      ...(isPlainObject(option.textStyle) ? option.textStyle : {}),
+      color: palette.text,
+    },
+    title: applyTitleTheme(option.title, palette),
+    legend: applyLegendTheme(option.legend, palette),
+    xAxis: applyAxisTheme(option.xAxis, palette),
+    yAxis: applyAxisTheme(option.yAxis, palette),
+    angleAxis: applyAxisTheme(option.angleAxis, palette),
+    radiusAxis: applyAxisTheme(option.radiusAxis, palette),
+    visualMap: applyVisualMapTheme(option.visualMap, palette),
+    radar: isPlainObject(option.radar)
+      ? {
+          ...radar,
+          axisName: {
+            ...(isPlainObject(radar.axisName) ? radar.axisName : {}),
+            color: palette.text,
+          },
+          splitLine: {
+            ...(isPlainObject(radar.splitLine) ? radar.splitLine : {}),
+            lineStyle: {
+              ...(isPlainObject(radar.splitLine?.lineStyle) ? radar.splitLine.lineStyle : {}),
+              color: palette.splitLine,
+            },
+          },
+        }
+      : option.radar,
+    tooltip: {
+      ...tooltip,
+      backgroundColor: palette.tooltipBg,
+      borderColor: palette.tooltipBorder,
+      textStyle: {
+        ...(isPlainObject(tooltip.textStyle) ? tooltip.textStyle : {}),
+        color: palette.text,
+      },
+      axisPointer: {
+        ...axisPointer,
+        lineStyle: {
+          ...(isPlainObject(axisPointer.lineStyle) ? axisPointer.lineStyle : {}),
+          color: palette.axisLine,
+        },
+        label: {
+          ...pointerLabel,
+          color: palette.text,
+          backgroundColor: palette.tooltipBg,
+        },
+      },
+    },
+    series: applySeriesTheme(option.series, palette, isDarkMode),
+  };
+}
+
+function AssistantChart({ option, isDarkMode }) {
   const chartRef = useRef(null);
+  const themedOption = useMemo(
+    () => createThemedChartOption(option, isDarkMode),
+    [option, isDarkMode],
+  );
 
   useEffect(() => {
-    if (!option || typeof option !== "object" || Array.isArray(option)) return undefined;
+    if (!themedOption || typeof themedOption !== "object" || Array.isArray(themedOption)) {
+      return undefined;
+    }
     if (!chartRef.current) return undefined;
 
     const chart = echarts.init(chartRef.current);
-    chart.setOption(option, true);
+    chart.setOption(themedOption, true);
     // Ensure chart fits after bubble layout settles.
     const rafId = window.requestAnimationFrame(() => {
       chart.resize();
@@ -93,9 +417,9 @@ function AssistantChart({ option }) {
       window.removeEventListener("resize", handleResize);
       chart.dispose();
     };
-  }, [option]);
+  }, [themedOption]);
 
-  if (!option || typeof option !== "object" || Array.isArray(option)) return null;
+  if (!themedOption || typeof themedOption !== "object" || Array.isArray(themedOption)) return null;
 
   return (
     <Box
@@ -105,17 +429,18 @@ function AssistantChart({ option }) {
         height: { xs: 240, sm: 300 },
         mt: 1,
         border: "1px solid",
-        borderColor: "divider",
+        borderColor: isDarkMode ? "rgba(121, 168, 255, 0.3)" : "divider",
         borderRadius: 1.5,
-        bgcolor: "background.default",
+        bgcolor: isDarkMode ? "rgba(10, 13, 20, 0.92)" : "background.default",
       }}
     />
   );
 }
 
-export default function LangflowWidget() {
+export default function LangflowWidget({ themeMode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isDarkMode = themeMode ? themeMode !== "light" : true;
 
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -514,7 +839,7 @@ export default function LangflowWidget() {
                       </Stack>
                     )}
 
-                    {!isUser && <AssistantChart option={item.graphOption} />}
+                    {!isUser && <AssistantChart option={item.graphOption} isDarkMode={isDarkMode} />}
                   </Paper>
 
                   {isUser && (

@@ -31,8 +31,22 @@ export default function TradeModals({
     <>
       {tradeModal.open && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <h3>{tradeModal.type === "buy" ? "Buy" : "Sell"} Amount</h3>
+          <div
+            className={`modal-card trade-modal ${
+              tradeModal.type === "buy" ? "is-buy" : "is-sell"
+            }`}
+          >
+            <div className="modal-title-row">
+              <h3>{tradeModal.type === "buy" ? "Buy" : "Sell"} Order</h3>
+              <span className="modal-side-pill">
+                {tradeModal.type === "buy" ? "BUY" : "SELL"}
+              </span>
+            </div>
+            {selected?.symbol && (
+              <p className="modal-symbol">
+                {selected.symbol} · {selected.name || selected.type || "Asset"}
+              </p>
+            )}
             {interactionDisabled && (
               <div className="modal-warning">
                 Guest mode cannot submit trades. Switch to Logged in to continue.
@@ -65,6 +79,7 @@ export default function TradeModals({
               Share Amount
             </label>
             <input
+              className="modal-input"
               id="trade-amount"
               type="text"
               min="0"
@@ -87,6 +102,7 @@ export default function TradeModals({
               Cash Amount
             </label>
             <input
+              className="modal-input"
               id="trade-cash"
               type="text"
               min="0"
@@ -116,6 +132,7 @@ export default function TradeModals({
             <div className="modal-actions">
               <button
                 type="button"
+                className="modal-btn modal-btn-secondary"
                 onClick={() => setTradeModal({ open: false, type: null })}
                 disabled={tradeSubmitting}
               >
@@ -123,6 +140,7 @@ export default function TradeModals({
               </button>
               <button
                 type="button"
+                className="modal-btn modal-btn-primary"
                 disabled={disableSubmit}
                 onClick={onConfirmTrade}
               >
@@ -135,10 +153,14 @@ export default function TradeModals({
 
       {confirmation && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal-card">
+          <div className="modal-card confirmation-modal">
             <p className="modal-confirmation">{confirmation}</p>
             <div className="modal-actions">
-              <button type="button" onClick={() => setConfirmation("")}>
+              <button
+                type="button"
+                className="modal-btn modal-btn-primary"
+                onClick={() => setConfirmation("")}
+              >
                 OK
               </button>
             </div>

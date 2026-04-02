@@ -43,6 +43,10 @@ Spring Boot 3 + Java 17 backend scaffold with JPA and MySQL support.
 - `YAHOO_FINANCE_BASE_URL`
 - `YAHOO_FINANCE_TIMEOUT`
 - `YAHOO_FINANCE_USER_AGENT`
+- `TWELVE_DATA_API_KEY`
+- `TWELVE_DATA_API_KEYS` (comma-separated keys, used as a fallback key pool)
+- `TWELVE_DATA_MAX_REQUESTS_PER_MINUTE`
+- `TWELVE_DATA_RATE_LIMIT_COOLDOWN`
 - `FX_ENABLED`
 - `FX_REPORTING_CURRENCY`
 - `FX_PERSIST_HISTORY`
@@ -60,7 +64,7 @@ mvn spring-boot:run
 
 Default local startup targets a MySQL container on `localhost:3306` with database `mydatabase`, user `myuser`, and password `MyUserPass123`.
 
-If you do not have MySQL running locally, use the built-in H2 integration profile for frontend/backend joint debugging:
+Use the `local` profile for frontend/backend joint debugging with MySQL:
 
 ```bash
 cd backend
@@ -69,10 +73,10 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
 
 The `local` profile provides:
 
-- in-memory H2 database with schema only (no seed data)
+- MySQL datasource (same defaults as `application.yml`, override with `LOCAL_SPRING_DATASOURCE_*`)
+- SQL init disabled by default (`spring.sql.init.mode=never`), suitable for manual table management
 - disabled schedulers and rate limiting
-- Yahoo Finance disabled so asset search stays deterministic
-- H2 console at `http://localhost:8080/h2-console`
+- Yahoo Finance enabled for market data fallback testing
 
 Every request must include the configured request key header:
 

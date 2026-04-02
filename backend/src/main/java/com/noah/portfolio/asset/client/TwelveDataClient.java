@@ -2,12 +2,19 @@ package com.noah.portfolio.asset.client;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -24,12 +31,19 @@ import com.noah.portfolio.asset.dto.AssetPriceHistoryItem;
 @Component
 public class TwelveDataClient {
 
+    private static final Logger log = LoggerFactory.getLogger(TwelveDataClient.class);
     private static final String TIME_SERIES_PATH = "/time_series";
     private static final String PRICE_PATH = "/price";
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final TwelveDataProperties properties;
+    private final Object rateLimitLock = new Object();
+
+    private List<String> activeApiKeys = List.of();
+    private final Map<String, ApiKeyState> apiKeyStates = new LinkedHashMap<>();
+    private int nextApiKeyCursor = 0;
+    private Instant lastGlobalThrottleWarnAt = Instant.EPOCH;
 
     public TwelveDataClient(
             RestClient.Builder restClientBuilder,
@@ -53,76 +67,264 @@ public class TwelveDataClient {
     }
 
     public List<AssetPriceHistoryItem> fetchDailyHistory(String symbol, LocalDate startDate, LocalDate endDate) {
-        if (!properties.isEnabled() || !StringUtils.hasText(properties.getApiKey())) {
+        if (!properties.isEnabled() || properties.resolveApiKeys().isEmpty()) {
             return List.of();
         }
-
-        try {
-            String response = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path(TIME_SERIES_PATH)
-                            .queryParam("symbol", symbol)
-                            .queryParam("interval", "1day")
-                            .queryParam("outputsize", 120)
-                            .queryParam("apikey", properties.getApiKey())
-                            .build())
-                    .retrieve()
-                    .body(String.class);
-            JsonNode root = objectMapper.readTree(response);
-
-            if ("error".equalsIgnoreCase(text(root, "status"))) {
-                throw new TwelveDataLookupException("Twelve Data error: " + text(root, "message"), null);
-            }
-
-            JsonNode values = root.path("values");
-            if (!values.isArray()) {
+        int maxAttempts = Math.max(1, properties.resolveApiKeys().size());
+        for (int attempt = 0; attempt < maxAttempts; attempt += 1) {
+            Optional<String> maybeApiKey = tryAcquirePermit("history", symbol);
+            if (maybeApiKey.isEmpty()) {
                 return List.of();
             }
+            String apiKey = maybeApiKey.get();
 
-            List<AssetPriceHistoryItem> items = new ArrayList<>();
-            for (JsonNode value : values) {
-                LocalDate tradeDate = parseDate(text(value, "datetime"));
-                BigDecimal close = decimal(text(value, "close"));
-                if (tradeDate == null || close == null) {
-                    continue;
+            try {
+                String response = restClient.get()
+                        .uri(uriBuilder -> uriBuilder
+                                .path(TIME_SERIES_PATH)
+                                .queryParam("symbol", symbol)
+                                .queryParam("interval", "1day")
+                                .queryParam("outputsize", 120)
+                                .queryParam("apikey", apiKey)
+                                .build())
+                        .retrieve()
+                        .body(String.class);
+                JsonNode root = objectMapper.readTree(response);
+
+                if ("error".equalsIgnoreCase(text(root, "status"))) {
+                    String message = text(root, "message");
+                    if (isRateLimitMessage(message)) {
+                        activateCooldown("history", symbol, apiKey, message);
+                        continue;
+                    }
+                    throw new TwelveDataLookupException("Twelve Data error: " + message, null);
                 }
-                if (tradeDate.isBefore(startDate) || tradeDate.isAfter(endDate)) {
-                    continue;
+
+                JsonNode values = root.path("values");
+                if (!values.isArray()) {
+                    return List.of();
                 }
-                items.add(new AssetPriceHistoryItem(tradeDate, close));
+
+                List<AssetPriceHistoryItem> items = new ArrayList<>();
+                for (JsonNode value : values) {
+                    LocalDate tradeDate = parseDate(text(value, "datetime"));
+                    BigDecimal close = decimal(text(value, "close"));
+                    if (tradeDate == null || close == null) {
+                        continue;
+                    }
+                    if (tradeDate.isBefore(startDate) || tradeDate.isAfter(endDate)) {
+                        continue;
+                    }
+                    items.add(new AssetPriceHistoryItem(tradeDate, close));
+                }
+
+                items.sort(Comparator.comparing(AssetPriceHistoryItem::tradeDate));
+                return items;
+            } catch (IOException | RestClientException ex) {
+                throw new TwelveDataLookupException("Failed to fetch Twelve Data history for symbol: " + symbol, ex);
             }
-
-            items.sort(Comparator.comparing(AssetPriceHistoryItem::tradeDate));
-            return items;
-        } catch (IOException | RestClientException ex) {
-            throw new TwelveDataLookupException("Failed to fetch Twelve Data history for symbol: " + symbol, ex);
         }
+
+        return List.of();
     }
 
     public Optional<BigDecimal> fetchRegularMarketPrice(String symbol) {
-        if (!properties.isEnabled() || !StringUtils.hasText(properties.getApiKey())) {
+        if (!properties.isEnabled() || properties.resolveApiKeys().isEmpty()) {
             return Optional.empty();
         }
+        int maxAttempts = Math.max(1, properties.resolveApiKeys().size());
+        for (int attempt = 0; attempt < maxAttempts; attempt += 1) {
+            Optional<String> maybeApiKey = tryAcquirePermit("price", symbol);
+            if (maybeApiKey.isEmpty()) {
+                return Optional.empty();
+            }
+            String apiKey = maybeApiKey.get();
 
-        try {
-            String response = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path(PRICE_PATH)
-                            .queryParam("symbol", symbol)
-                            .queryParam("apikey", properties.getApiKey())
-                            .build())
-                    .retrieve()
-                    .body(String.class);
-            JsonNode root = objectMapper.readTree(response);
+            try {
+                String response = restClient.get()
+                        .uri(uriBuilder -> uriBuilder
+                                .path(PRICE_PATH)
+                                .queryParam("symbol", symbol)
+                                .queryParam("apikey", apiKey)
+                                .build())
+                        .retrieve()
+                        .body(String.class);
+                JsonNode root = objectMapper.readTree(response);
 
-            if ("error".equalsIgnoreCase(text(root, "status"))) {
-                throw new TwelveDataLookupException("Twelve Data error: " + text(root, "message"), null);
+                if ("error".equalsIgnoreCase(text(root, "status"))) {
+                    String message = text(root, "message");
+                    if (isRateLimitMessage(message)) {
+                        activateCooldown("price", symbol, apiKey, message);
+                        continue;
+                    }
+                    throw new TwelveDataLookupException("Twelve Data error: " + message, null);
+                }
+
+                return Optional.ofNullable(decimal(text(root, "price")));
+            } catch (IOException | RestClientException ex) {
+                throw new TwelveDataLookupException("Failed to fetch Twelve Data quote price for symbol: " + symbol, ex);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> tryAcquirePermit(String operation, String symbol) {
+        int maxRequestsPerMinute = Math.max(1, properties.getMaxRequestsPerMinute());
+        Instant now = Instant.now();
+        synchronized (rateLimitLock) {
+            syncApiKeyStates();
+            if (activeApiKeys.isEmpty()) {
+                return Optional.empty();
             }
 
-            return Optional.ofNullable(decimal(text(root, "price")));
-        } catch (IOException | RestClientException ex) {
-            throw new TwelveDataLookupException("Failed to fetch Twelve Data quote price for symbol: " + symbol, ex);
+            long epochMinute = now.getEpochSecond() / 60L;
+            int keyCount = activeApiKeys.size();
+            for (int offset = 0; offset < keyCount; offset += 1) {
+                int keyIndex = (nextApiKeyCursor + offset) % keyCount;
+                String apiKey = activeApiKeys.get(keyIndex);
+                ApiKeyState state = apiKeyStates.get(apiKey);
+                if (state == null) {
+                    continue;
+                }
+
+                if (epochMinute != state.currentEpochMinute) {
+                    state.currentEpochMinute = epochMinute;
+                    state.requestsInCurrentMinute = 0;
+                }
+
+                if (now.isBefore(state.cooldownUntil)) {
+                    warnThrottled(operation, symbol, apiKey, "cooldown", state, now);
+                    continue;
+                }
+
+                if (state.requestsInCurrentMinute >= maxRequestsPerMinute) {
+                    Instant nextMinute = Instant.ofEpochSecond((epochMinute + 1L) * 60L);
+                    Instant configuredCooldownEnd = now.plus(safeCooldownDuration());
+                    state.cooldownUntil = configuredCooldownEnd.isAfter(nextMinute) ? configuredCooldownEnd : nextMinute;
+                    warnThrottled(operation, symbol, apiKey, "local-rate-limit", state, now);
+                    continue;
+                }
+
+                state.requestsInCurrentMinute += 1;
+                nextApiKeyCursor = (keyIndex + 1) % keyCount;
+                return Optional.of(apiKey);
+            }
+
+            warnNoAvailableKeys(operation, symbol, keyCount, now);
+            return Optional.empty();
         }
+    }
+
+    private Duration safeCooldownDuration() {
+        Duration configured = properties.getRateLimitCooldown();
+        if (configured == null || configured.isZero() || configured.isNegative()) {
+            return Duration.ofSeconds(60);
+        }
+        return configured;
+    }
+
+    private void activateCooldown(String operation, String symbol, String apiKey, String message) {
+        Instant now = Instant.now();
+        Instant cooldownEnd = now.plus(safeCooldownDuration());
+        Instant effectiveCooldownUntil = cooldownEnd;
+        synchronized (rateLimitLock) {
+            syncApiKeyStates();
+            ApiKeyState state = apiKeyStates.computeIfAbsent(apiKey, ignored -> new ApiKeyState());
+            if (cooldownEnd.isAfter(state.cooldownUntil)) {
+                state.cooldownUntil = cooldownEnd;
+            }
+            effectiveCooldownUntil = state.cooldownUntil;
+            warnThrottled(operation, symbol, apiKey, "provider-rate-limit", state, now);
+        }
+        log.warn(
+                "Twelve Data provider rate limit hit for {} {} (key={}). Cooling down until {}. Message: {}",
+                operation,
+                symbol,
+                redactApiKey(apiKey),
+                effectiveCooldownUntil,
+                message
+        );
+    }
+
+    private boolean isRateLimitMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("run out of api credits")
+                || normalized.contains("current limit")
+                || normalized.contains("wait for the next minute")
+                || normalized.contains("too many requests")
+                || normalized.contains("rate limit");
+    }
+
+    private void warnThrottled(
+            String operation,
+            String symbol,
+            String apiKey,
+            String reason,
+            ApiKeyState state,
+            Instant now
+    ) {
+        if (Duration.between(state.lastThrottleWarnAt, now).compareTo(Duration.ofSeconds(10)) < 0) {
+            return;
+        }
+        state.lastThrottleWarnAt = now;
+        log.warn(
+                "Twelve Data request skipped by {} for {} {} (key={}). minuteCount={}, cooldownUntil={}",
+                reason,
+                operation,
+                symbol,
+                redactApiKey(apiKey),
+                state.requestsInCurrentMinute,
+                state.cooldownUntil
+        );
+    }
+
+    private void warnNoAvailableKeys(String operation, String symbol, int keyCount, Instant now) {
+        if (Duration.between(lastGlobalThrottleWarnAt, now).compareTo(Duration.ofSeconds(10)) < 0) {
+            return;
+        }
+        lastGlobalThrottleWarnAt = now;
+        log.warn(
+                "Twelve Data request skipped: no available API key for {} {}. keyCount={}",
+                operation,
+                symbol,
+                keyCount
+        );
+    }
+
+    private void syncApiKeyStates() {
+        List<String> resolvedApiKeys = properties.resolveApiKeys();
+        if (resolvedApiKeys.equals(activeApiKeys)) {
+            return;
+        }
+
+        activeApiKeys = resolvedApiKeys;
+        apiKeyStates.keySet().retainAll(resolvedApiKeys);
+        for (String apiKey : resolvedApiKeys) {
+            apiKeyStates.computeIfAbsent(apiKey, ignored -> new ApiKeyState());
+        }
+        if (activeApiKeys.isEmpty()) {
+            nextApiKeyCursor = 0;
+            return;
+        }
+        nextApiKeyCursor = Math.floorMod(nextApiKeyCursor, activeApiKeys.size());
+        log.info("Twelve Data API key pool updated. keyCount={}", activeApiKeys.size());
+    }
+
+    private String redactApiKey(String apiKey) {
+        if (!StringUtils.hasText(apiKey)) {
+            return "N/A";
+        }
+        String trimmed = apiKey.trim();
+        if (trimmed.length() <= 4) {
+            return trimmed.substring(0, 1) + "***";
+        }
+        if (trimmed.length() <= 8) {
+            return trimmed.substring(0, 2) + "***";
+        }
+        return trimmed.substring(0, 4) + "***" + trimmed.substring(trimmed.length() - 4);
     }
 
     private String text(JsonNode node, String fieldName) {
@@ -151,5 +353,12 @@ public class TwelveDataClient {
         public TwelveDataLookupException(String message, Throwable cause) {
             super(message, cause);
         }
+    }
+
+    private static final class ApiKeyState {
+        private long currentEpochMinute = -1L;
+        private int requestsInCurrentMinute = 0;
+        private Instant cooldownUntil = Instant.EPOCH;
+        private Instant lastThrottleWarnAt = Instant.EPOCH;
     }
 }

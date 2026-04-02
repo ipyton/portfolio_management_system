@@ -13,7 +13,8 @@ CREATE TABLE assets (
     currency VARCHAR(10) NOT NULL,
     exchange VARCHAR(20),
     region VARCHAR(50),
-    is_benchmark BOOLEAN NOT NULL DEFAULT FALSE
+    is_benchmark BOOLEAN NOT NULL DEFAULT FALSE,
+    last_price_refreshed_at TIMESTAMP
 );
 
 CREATE TABLE asset_stock_detail (

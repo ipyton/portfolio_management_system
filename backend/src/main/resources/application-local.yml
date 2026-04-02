@@ -1,21 +1,16 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:portfolio_management;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password:
-    driver-class-name: org.h2.Driver
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    url: ${LOCAL_SPRING_DATASOURCE_URL:${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/portfolio?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}}
+    username: ${LOCAL_SPRING_DATASOURCE_USERNAME:${SPRING_DATASOURCE_USERNAME:root}}
+    password: ${LOCAL_SPRING_DATASOURCE_PASSWORD:${SPRING_DATASOURCE_PASSWORD:StrongRootPass123}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: ${LOCAL_JPA_DDL_AUTO:none}
     show-sql: false
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema-local.sql
+      mode: never
 resilience:
   rate-limit:
     enabled: false
@@ -30,7 +25,7 @@ scheduler:
     system-config-refresh:
       enabled: false
 yahoo-finance:
-  enabled: false
+  enabled: true
 finnhub:
   enabled: true
   base-url: ${FINNHUB_BASE_URL:https://finnhub.io}
@@ -40,7 +35,10 @@ twelve-data:
   enabled: true
   base-url: ${TWELVE_DATA_BASE_URL:https://api.twelvedata.com}
   timeout: ${TWELVE_DATA_TIMEOUT:5s}
-  api-key: ${TWELVE_DATA_API_KEY:c993f88aa55f41418fc3449756880e99}
+  api-key: ${TWELVE_DATA_API_KEY:}
+  api-keys: ${TWELVE_DATA_API_KEYS:c993f88aa55f41418fc3449756880e99,9a2ab1f6c57b4aeb803d0ca5b5167e18}
+  max-requests-per-minute: ${TWELVE_DATA_MAX_REQUESTS_PER_MINUTE:6}
+  rate-limit-cooldown: ${TWELVE_DATA_RATE_LIMIT_COOLDOWN:65s}
 eastmoney:
   enabled: true
   base-url: ${EASTMONEY_BASE_URL:https://push2his.eastmoney.com}
