@@ -939,7 +939,7 @@ export default function AnalysisPage({ meta }) {
         <div className="watchlist-header">
           <div>
             <p className="eyebrow">Setup</p>
-            <h2 className="watchlist-title">Build Basket</h2>
+            <h2 className="watchlist-title">Analysis</h2>
           </div>
         </div>
 

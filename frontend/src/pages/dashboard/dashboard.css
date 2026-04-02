@@ -1,6 +1,6 @@
 .dashboard-page {
   display: grid;
-  gap: 20px;
+  gap: 24px;
   min-width: 0;
 }
 
@@ -38,9 +38,10 @@
   background: var(--card-bg);
   box-shadow: var(--card-shadow);
   border-radius: 22px;
-  padding: 14px;
+  padding: 14px 16px;
   display: grid;
   gap: 12px;
+  overflow: hidden;
 }
 
 /* Fixed round navigation buttons */
@@ -104,9 +105,21 @@
 
 /* Slider controls */
 .slider-tab-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: 100%;
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 2px 0 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.78));
+  scrollbar-width: none;
+}
+
+.slider-tab-row::-webkit-scrollbar {
+  display: none;
 }
 
 .slider-tab {
@@ -128,7 +141,7 @@
 .slider-heading-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
   gap: 12px;
 }
 
@@ -176,10 +189,23 @@
 
 .slider-panel-viewport {
   min-width: 0;
+  height: 420px;
+  min-height: 420px;
+  max-height: 420px;
+  overflow: hidden;
 }
 
 .slider-panel-motion {
+  min-height: 100%;
+  height: 100%;
+  display: grid;
+  align-content: start;
   animation: slider-panel-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slider-panel-motion > * {
+  min-height: 100%;
+  height: 100%;
 }
 
 @keyframes slider-panel-in {
@@ -208,7 +234,7 @@
 .dashboard-top-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 400px;
   align-items: stretch;
 }
 
@@ -289,24 +315,29 @@
 .dashboard-page .slide-card-grid,
 .dashboard-page .rt-layout,
 .dashboard-page .perf-layout,
+.dashboard-page .risk-layout,
 .dashboard-page .holdings-dist-layout,
 .dashboard-page .rt-metrics-grid,
+.dashboard-page .risk-metrics-grid,
 .dashboard-page .perf-cards,
 .dashboard-page .holdings-dist-cards {
   min-width: 0;
 }
 
 .dashboard-page .slide-card-grid {
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .dashboard-page .slide-metric {
   min-width: 0;
   overflow: hidden;
-  padding: 14px 15px;
+  padding: 12px 13px;
   border-radius: 16px;
-  gap: 6px;
+  gap: 5px;
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  background: linear-gradient(180deg, rgba(121, 168, 255, 0.06), rgba(121, 168, 255, 0.02));
+  box-shadow: 0 6px 14px rgba(17, 24, 39, 0.04);
 }
 
 .dashboard-page .slide-metric-label {
@@ -317,7 +348,7 @@
 .dashboard-page .slide-metric-value {
   margin: 2px 0;
   max-width: 100%;
-  font-size: clamp(0.98rem, 1.7vw, 1.28rem);
+  font-size: clamp(0.95rem, 1.55vw, 1.18rem);
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
@@ -326,20 +357,75 @@
 }
 
 .dashboard-page .slide-metric-detail {
-  font-size: 0.75rem;
-  line-height: 1.4;
+  font-size: 0.73rem;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .dashboard-page .rt-layout {
-  grid-template-columns: minmax(0, 250px) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(185px, 0.88fr) 16px minmax(0, 2.12fr);
+  gap: 12px;
+  min-height: 100%;
+  height: 100%;
+  align-items: start;
+}
+
+.dashboard-page .rt-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-content: stretch;
+  height: 90%;
+  align-self: start;
+}
+
+.dashboard-page .rt-spacer {
+  width: 16px;
+  min-width: 16px;
+}
+
+.dashboard-page .rt-metric-card {
+  height: 100%;
+  align-content: center;
+  border-width: 1px;
+  padding: 8px 9px;
+}
+
+.dashboard-page .rt-metric-card.is-primary {
+  background: linear-gradient(135deg, rgba(79, 123, 255, 0.08), rgba(79, 123, 255, 0.02));
+  box-shadow: 0 10px 26px rgba(79, 123, 255, 0.08);
 }
 
 .dashboard-page .rt-pnl-card {
-  padding: 18px 16px 14px;
+  height: 100%;
+  align-self: start;
+  padding: 8px 8px 7px;
   border-radius: 16px;
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  background: linear-gradient(180deg, rgba(121, 168, 255, 0.07), rgba(121, 168, 255, 0.02));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.dashboard-page .rt-pnl-head {
+  display: grid;
+  gap: 3px;
+}
+
+.dashboard-page .rt-pnl-chart {
+  margin-top: auto;
+  height: 70%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard-page .rt-pnl-chart > div {
+  height: 100%;
+  min-height: 0;
 }
 
 .dashboard-page .rt-pnl-value {
@@ -353,26 +439,343 @@
 }
 
 .dashboard-page .perf-layout {
-  grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(200px, 0.85fr) minmax(0, 2.15fr);
+  gap: 12px;
+  min-height: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+
+.dashboard-page .perf-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: stretch;
+}
+
+.dashboard-page .perf-metric-card {
+  height: 100%;
+  align-content: center;
+  border-width: 1px;
+}
+
+.dashboard-page .perf-metric-card.is-primary {
+  background: linear-gradient(135deg, rgba(79, 123, 255, 0.08), rgba(79, 123, 255, 0.02));
+  box-shadow: 0 10px 26px rgba(79, 123, 255, 0.08);
+}
+
+.dashboard-page .risk-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  min-height: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+
+.dashboard-page .trading-layout {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 100%;
+  height: 100%;
+}
+
+.dashboard-page .trading-panel {
+  height: 100%;
+  padding: 14px 14px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  background:
+    radial-gradient(130% 120% at 100% 0%, rgba(79, 123, 255, 0.13), rgba(79, 123, 255, 0) 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.96));
+  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-page .trading-panel-head {
+  display: grid;
+  gap: 6px;
+}
+
+.dashboard-page .trading-panel-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: stretch;
+}
+
+.dashboard-page .risk-metrics-grid {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 100%;
+  max-width: 360px;
+}
+
+.dashboard-page .risk-spacer {
+  min-width: 24px;
+}
+
+.dashboard-page .risk-panel {
+  height: 100%;
+  padding: 14px 14px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  background:
+    radial-gradient(130% 120% at 100% 0%, rgba(79, 123, 255, 0.13), rgba(79, 123, 255, 0) 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.96));
+  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-page .risk-panel-head {
+  display: grid;
+  gap: 6px;
+}
+
+.dashboard-page .risk-panel-summary {
+  margin: 2px 0 0;
+  font-size: 0.79rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.dashboard-page .risk-panel-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: stretch;
+}
+
+.dashboard-page .risk-kpi-card {
+  height: 100%;
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 250, 255, 0.9));
+  box-shadow: none;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.dashboard-page .risk-kpi-card.is-primary {
+  background: linear-gradient(145deg, rgba(79, 123, 255, 0.16), rgba(255, 255, 255, 0.92));
+  box-shadow: none;
+}
+
+.dashboard-page .risk-kpi-data {
+  padding: 11px 12px 9px;
+  display: grid;
+  gap: 5px;
+}
+
+.dashboard-page .risk-kpi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-page .risk-kpi-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  background: rgba(79, 123, 255, 0.14);
+}
+
+.dashboard-page .risk-kpi-title {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dashboard-page .risk-kpi-value {
+  margin: 0;
+  font-size: clamp(1.2rem, 2.1vw, 1.72rem);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-page .risk-kpi-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.dashboard-page .risk-kpi-intro {
+  border-top: 1px dashed rgba(108, 125, 158, 0.25);
+  padding: 8px 12px 9px;
+  background: rgba(121, 168, 255, 0.05);
+}
+
+.dashboard-page .risk-kpi-intro p {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #4b5563;
+}
+
+.dashboard-page .risk-footnote {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(108, 125, 158, 0.28);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-page .risk-footnote-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.dashboard-page .risk-footnote p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.dashboard-page .risk-panel .perf-chart-heading {
+  font-size: 0.8rem;
+}
+
+.dashboard-page .risk-panel .perf-chart-sub {
+  font-size: 0.95rem;
 }
 
 .dashboard-page .holdings-dist-layout {
-  grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(0, 2.1fr);
+  gap: 12px;
+}
+
+.dashboard-page .holdings-dist-cards .slide-card-grid {
+  grid-template-columns: 1fr;
 }
 
 .dashboard-page .perf-chart-panel,
 .dashboard-page .holdings-pie-panel {
-  padding: 16px 18px 14px;
+  padding: 14px 14px 12px;
   border-radius: 16px;
 }
 
-.dashboard-page .holdings-pie-content {
+.dashboard-page .perf-chart-panel {
+  height: 100%;
+  border: 1px solid rgba(108, 125, 158, 0.16);
+  background: linear-gradient(180deg, rgba(121, 168, 255, 0.06), rgba(121, 168, 255, 0.02));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashboard-page .perf-chart-panel > div:last-child {
+  flex: 1;
+  min-height: 0;
+}
+
+.dashboard-page .perf-chart-panel > div:last-child > div {
+  height: 100%;
+}
+
+.dashboard-page .perf-chart-panel > div:last-child > div > svg {
+  height: 100%;
+}
+
+.dashboard-page .perf-benchmark-badge {
+  margin: 0 0 4px;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.dashboard-page .perf-benchmark-badge.is-sp500 {
+  color: #2563eb;
+}
+
+.dashboard-page .holdings-pie-grid {
   display: grid;
-  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.dashboard-page .holdings-pie-card {
+  border: 1px solid rgba(108, 125, 158, 0.18);
+  border-radius: 14px;
+  padding: 10px 10px 9px;
+  background: linear-gradient(180deg, rgba(121, 168, 255, 0.06), rgba(121, 168, 255, 0.01));
+  display: grid;
+  gap: 6px;
+}
+
+.dashboard-page .holdings-pie-viz {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.dashboard-page .holdings-pie-svg {
+  width: 160px;
+  max-width: 100%;
+  height: auto;
+}
+
+.dashboard-page .holdings-pie-hover {
+  width: 100%;
+  border: 1px dashed rgba(108, 125, 158, 0.24);
+  border-radius: 10px;
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.dashboard-page .holdings-pie-hover-label {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dashboard-page .holdings-pie-hover-value {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #1f4ed8;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-page .holdings-pie-hover-pct {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.dashboard-page .holdings-pie-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
 }
 
 .dashboard-page .holdings-pie-chart-wrap {
@@ -385,7 +788,7 @@
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .dashboard-page .holdings-pie-legend-item {
@@ -643,6 +1046,10 @@
   color: var(--dark-muted-text);
 }
 
+:root:not([data-theme="light"]) .slider-tab-row {
+  background: linear-gradient(180deg, rgba(17, 21, 29, 0.94), rgba(17, 21, 29, 0.78));
+}
+
 :root:not([data-theme="light"]) .slider-tab.active {
   background: rgba(79, 123, 255, 0.12);
 }
@@ -660,6 +1067,76 @@
 :root:not([data-theme="light"]) .trade-list-card {
   background: linear-gradient(180deg, rgba(7, 10, 16, 0.98), rgba(4, 7, 12, 0.98));
   border-color: rgba(93, 110, 150, 0.28);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-panel {
+  border-color: rgba(93, 110, 150, 0.3);
+  background:
+    radial-gradient(130% 120% at 100% 0%, rgba(79, 123, 255, 0.2), rgba(79, 123, 255, 0) 56%),
+    linear-gradient(180deg, rgba(13, 18, 28, 0.98), rgba(8, 13, 22, 0.97));
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.36);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-panel-summary,
+:root:not([data-theme="light"]) .dashboard-page .risk-metric-note,
+:root:not([data-theme="light"]) .dashboard-page .risk-footnote p {
+  color: #aeb8cd;
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-metric-card {
+  border-color: rgba(93, 110, 150, 0.28);
+  background: linear-gradient(180deg, rgba(14, 20, 31, 0.98), rgba(9, 14, 23, 0.96));
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-metric-card.is-primary {
+  background: linear-gradient(145deg, rgba(61, 111, 255, 0.28), rgba(15, 24, 40, 0.88));
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-card {
+  border-color: rgba(93, 110, 150, 0.3);
+  background: linear-gradient(180deg, rgba(14, 20, 31, 0.98), rgba(9, 14, 23, 0.96));
+  box-shadow: none;
+}
+
+:root:not([data-theme="light"]) .dashboard-page .trading-panel {
+  border-color: rgba(93, 110, 150, 0.3);
+  background:
+    radial-gradient(130% 120% at 100% 0%, rgba(79, 123, 255, 0.2), rgba(79, 123, 255, 0) 56%),
+    linear-gradient(180deg, rgba(13, 18, 28, 0.98), rgba(8, 13, 22, 0.97));
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.36);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-card.is-primary {
+  background: linear-gradient(145deg, rgba(61, 111, 255, 0.28), rgba(15, 24, 40, 0.88));
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-title,
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-meta,
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-intro p {
+  color: #aeb8cd;
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-icon {
+  background: rgba(79, 123, 255, 0.22);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .risk-kpi-intro {
+  border-top-color: rgba(93, 110, 150, 0.35);
+  background: rgba(79, 123, 255, 0.08);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .holdings-pie-card {
+  border-color: rgba(93, 110, 150, 0.3);
+  background: linear-gradient(180deg, rgba(14, 20, 31, 0.95), rgba(9, 14, 23, 0.9));
+}
+
+:root:not([data-theme="light"]) .dashboard-page .holdings-pie-hover {
+  border-color: rgba(93, 110, 150, 0.36);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .holdings-pie-hover-value {
+  color: #79a8ff;
 }
 
 :root:not([data-theme="light"]) .trade-list-item {
@@ -696,6 +1173,25 @@
   .stock-bottom-grid {
     grid-template-columns: 1fr;
   }
+
+  .dashboard-page .rt-layout,
+  .dashboard-page .perf-layout,
+  .dashboard-page .holdings-dist-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-page .slide-card-grid,
+  .dashboard-page .perf-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-page .holdings-pie-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-page .trading-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -722,8 +1218,71 @@
     right: 10px;
   }
 
+  .slider-panel-viewport {
+    height: 383px;
+    min-height: 383px;
+    max-height: 383px;
+  }
+
+  .slider-tab-row {
+    padding-bottom: 6px;
+  }
+
+  .dashboard-page .rt-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .dashboard-page .rt-spacer {
+    display: none;
+  }
+
+  .dashboard-page .rt-metrics-grid {
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .dashboard-page .perf-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .dashboard-page .perf-spacer {
+    display: none;
+  }
+
+  .dashboard-page .perf-metrics-grid {
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .dashboard-page .risk-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .dashboard-page .risk-spacer {
+    display: none;
+  }
+
+  .dashboard-page .risk-metrics-grid {
+    grid-template-rows: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .dashboard-page .risk-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-page .trading-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-page .slide-card-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .world-indices-head {
@@ -738,9 +1297,13 @@
     width: min(180px, 70vw);
   }
 
-  .dashboard-page .holdings-pie-content {
+  .dashboard-page .holdings-pie-grid {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .dashboard-page .holdings-dist-cards .slide-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

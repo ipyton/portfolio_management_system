@@ -9,11 +9,15 @@ export default function MetricsSlider({
   onNext,
   onSelectCategory,
   sparkPoints,
+  sparkLabels,
   benchPoints,
   benchmarkPoints,
   benchmarkLabels,
   benchmarkMeta,
-  donutSegments,
+  industryDonutSegments,
+  symbolAllocationSegments,
+  capitalSplitSegments,
+  reportingCurrency,
 }) {
   return (
     <section className="dashboard-metrics-slider">
@@ -87,11 +91,15 @@ export default function MetricsSlider({
             <CategoryPanel
               category={activeCategory}
               sparkPoints={sparkPoints}
+              sparkLabels={sparkLabels}
               benchPoints={benchPoints}
               benchmarkPoints={benchmarkPoints}
               benchmarkLabels={benchmarkLabels}
               benchmarkMeta={benchmarkMeta}
-              donutSegments={donutSegments}
+              industryDonutSegments={industryDonutSegments}
+              symbolAllocationSegments={symbolAllocationSegments}
+              capitalSplitSegments={capitalSplitSegments}
+              reportingCurrency={reportingCurrency}
             />
           </div>
         </div>

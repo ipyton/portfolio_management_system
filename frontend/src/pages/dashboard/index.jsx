@@ -41,7 +41,7 @@ const DEFAULT_CATEGORIES = [
     metrics: [
       { key: "holdingMarketValue", label: "Holding Market Value", value: "$1.84M", detail: "Current positions" },
       { key: "cashBalance", label: "Cash Balance", value: "$312,500", detail: "Available cash" },
-      { key: "availableFunds", label: "Available Funds", value: "$298,000", detail: "Post-settlement" },
+      { key: "currentProfit", label: "Current Profit", value: "N/A", detail: "Unrealized P&L" },
       { key: "holdings", label: "Holdings Count", value: "42", detail: "Active positions" },
     ],
   },
@@ -364,6 +364,155 @@ function buildBenchmarkChartModel(payload) {
   };
 }
 
+function sampleStd(values) {
+  if (!Array.isArray(values) || values.length < 2) {
+    return 0;
+  }
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + ((value - avg) ** 2), 0) / (values.length - 1);
+  return Math.sqrt(Math.max(variance, 0));
+}
+
+function deriveFallbackMetricsFromBenchmark(payload, riskFreeRateRaw) {
+  const chart = payload?.performance?.benchmarkChart || {};
+  const rawPoints = Array.isArray(chart?.points) ? chart.points : [];
+  const points = rawPoints
+    .map((point) => ({
+      portfolio: Number(point?.portfolio),
+      benchmark: Number(point?.benchmark),
+    }))
+    .filter((point) => Number.isFinite(point.portfolio) && Number.isFinite(point.benchmark));
+
+  if (points.length < 2) {
+    return {
+      returnCount: 0,
+      totalReturn: 0,
+      timeWeightedReturn: 0,
+      annualizedReturn: 0,
+      annualizedVolatility: 0,
+      beta: 1,
+      alpha: 0,
+      sharpeRatio: 0,
+    };
+  }
+
+  const firstPortfolio = points[0].portfolio;
+  const lastPortfolio = points[points.length - 1].portfolio;
+  if (!(firstPortfolio > 0) || !(lastPortfolio > 0)) {
+    return {
+      returnCount: 0,
+      totalReturn: 0,
+      timeWeightedReturn: 0,
+      annualizedReturn: 0,
+      annualizedVolatility: 0,
+      beta: 1,
+      alpha: 0,
+      sharpeRatio: 0,
+    };
+  }
+
+  const portfolioReturns = [];
+  const benchmarkReturns = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const prevPortfolio = points[i - 1].portfolio;
+    const prevBenchmark = points[i - 1].benchmark;
+    const currPortfolio = points[i].portfolio;
+    const currBenchmark = points[i].benchmark;
+    if (!(prevPortfolio > 0) || !(prevBenchmark > 0)) {
+      continue;
+    }
+    const pr = currPortfolio / prevPortfolio - 1;
+    const br = currBenchmark / prevBenchmark - 1;
+    if (Number.isFinite(pr) && Number.isFinite(br)) {
+      portfolioReturns.push(pr);
+      benchmarkReturns.push(br);
+    }
+  }
+
+  const returnCount = portfolioReturns.length;
+  const totalReturn = lastPortfolio / firstPortfolio - 1;
+  if (returnCount < 1) {
+    return {
+      returnCount: 0,
+      totalReturn: Number.isFinite(totalReturn) ? totalReturn : 0,
+      timeWeightedReturn: Number.isFinite(totalReturn) ? totalReturn : 0,
+      annualizedReturn: Number.isFinite(totalReturn) ? totalReturn : 0,
+      annualizedVolatility: 0,
+      beta: 1,
+      alpha: 0,
+      sharpeRatio: 0,
+    };
+  }
+
+  const timeWeightedReturn = totalReturn;
+  const annualizedReturn = timeWeightedReturn > -1
+    ? (Math.pow(1 + timeWeightedReturn, 252 / returnCount) - 1)
+    : null;
+  const stdDaily = sampleStd(portfolioReturns);
+  const annualizedVolatility = stdDaily > 0
+    ? stdDaily * Math.sqrt(252)
+    : Math.abs(portfolioReturns[0] || 0) * Math.sqrt(252);
+
+  const avgPortfolio = portfolioReturns.reduce((sum, value) => sum + value, 0) / returnCount;
+  const avgBenchmark = benchmarkReturns.reduce((sum, value) => sum + value, 0) / returnCount;
+  const covariance = returnCount > 1
+    ? portfolioReturns.reduce(
+      (sum, value, index) => sum + ((value - avgPortfolio) * (benchmarkReturns[index] - avgBenchmark)),
+      0,
+    ) / (returnCount - 1)
+    : 0;
+  const benchmarkVariance = returnCount > 1
+    ? benchmarkReturns.reduce((sum, value) => sum + ((value - avgBenchmark) ** 2), 0) / (returnCount - 1)
+    : 0;
+  let beta = null;
+  if (benchmarkVariance > 1e-12) {
+    beta = covariance / benchmarkVariance;
+  } else if (Math.abs(benchmarkReturns[0] || 0) > 1e-12) {
+    beta = portfolioReturns[0] / benchmarkReturns[0];
+  }
+
+  let rfAnnual = Number(riskFreeRateRaw);
+  if (!Number.isFinite(rfAnnual)) {
+    rfAnnual = 0;
+  }
+  if (rfAnnual > 1) {
+    rfAnnual /= 100;
+  }
+  const rfDaily = Math.pow(1 + rfAnnual, 1 / 252) - 1;
+  const alpha = Number.isFinite(beta)
+    ? ((avgPortfolio - (rfDaily + beta * (avgBenchmark - rfDaily))) * 252)
+    : null;
+  const stdForSharpe = sampleStd(portfolioReturns);
+  const sharpeRatio = stdForSharpe > 1e-12
+    ? (((avgPortfolio - rfDaily) / stdForSharpe) * Math.sqrt(252))
+    : 0;
+
+  return {
+    returnCount,
+    totalReturn: Number.isFinite(totalReturn) ? totalReturn : 0,
+    timeWeightedReturn: Number.isFinite(timeWeightedReturn) ? timeWeightedReturn : null,
+    annualizedReturn: Number.isFinite(annualizedReturn) ? annualizedReturn : null,
+    annualizedVolatility: Number.isFinite(annualizedVolatility) ? annualizedVolatility : null,
+    beta: Number.isFinite(beta) ? beta : null,
+    alpha: Number.isFinite(alpha) ? alpha : null,
+    sharpeRatio: Number.isFinite(sharpeRatio) ? sharpeRatio : 0,
+  };
+}
+
+function computeRealtimeCurrentProfit(realtime) {
+  const realtimeHoldings = Array.isArray(realtime?.holdings) ? realtime.holdings : [];
+  return realtimeHoldings.reduce((sum, holding) => {
+    const pnl = Number(holding?.unrealizedPnl);
+    return Number.isFinite(pnl) ? sum + pnl : sum;
+  }, 0);
+}
+
+function resolveTodayPnlValue(realtime) {
+  const currentProfit = computeRealtimeCurrentProfit(realtime);
+  const todayPnlRaw = Number(realtime?.todayPnl);
+  return Number.isFinite(todayPnlRaw) ? todayPnlRaw : currentProfit;
+}
+
 function buildDonutSegments(payload) {
   const industryDistribution = payload?.holdings?.industryDistribution;
   if (!Array.isArray(industryDistribution) || industryDistribution.length === 0) {
@@ -409,15 +558,28 @@ function buildLiveCategories(payload) {
   const metaSection = payload?.meta || {};
   const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "USD";
   const asOf = payload?.asOf || "N/A";
-  const navObservationCount = Number(metaSection.navObservationCount);
-  const availablePortfolioReturns = Number.isFinite(navObservationCount)
-    ? Math.max(0, navObservationCount - 1)
-    : null;
-  const annualizedNeedsMoreHistory = performance.annualizedReturn == null
-    && availablePortfolioReturns !== null
-    && availablePortfolioReturns < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
 
   const realtimeHoldings = Array.isArray(realtime.holdings) ? realtime.holdings : [];
+  const realtimeCurrentProfit = computeRealtimeCurrentProfit(realtime);
+  const todayPnlValue = Number.isFinite(Number(realtime.todayPnl))
+    ? Number(realtime.todayPnl)
+    : resolveTodayPnlValue(realtime);
+  const currentProfitTone = realtimeCurrentProfit > 0
+    ? "#16a34a"
+    : (realtimeCurrentProfit < 0 ? "#dc2626" : null);
+  const derivedMetrics = deriveFallbackMetricsFromBenchmark(payload, risk?.riskFreeRate);
+  const fallbackTotalReturn = Number.isFinite(performance.totalReturn)
+    ? Number(performance.totalReturn)
+    : (derivedMetrics?.totalReturn ?? 0);
+  const effectiveTwr = Number.isFinite(performance.timeWeightedReturn)
+    ? Number(performance.timeWeightedReturn)
+    : (derivedMetrics?.timeWeightedReturn ?? fallbackTotalReturn);
+  const effectiveAnnualizedReturn = Number.isFinite(performance.annualizedReturn)
+    ? Number(performance.annualizedReturn)
+    : ((derivedMetrics?.returnCount ?? 0) < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA
+      ? fallbackTotalReturn
+      : (derivedMetrics?.annualizedReturn ?? fallbackTotalReturn));
+  const fallbackDays = Math.max(1, derivedMetrics?.returnCount ?? 0);
 
   const assetClassDistribution = Array.isArray(holdings.assetClassDistribution)
     ? holdings.assetClassDistribution
@@ -438,20 +600,6 @@ function buildLiveCategories(payload) {
   const sellCount = tradeRecords.filter((item) =>
     String(item?.tradeType || item?.side || "").toUpperCase() === "SELL",
   ).length;
-  const benchmarkComparisons = Array.isArray(performance.benchmarkComparisons)
-    ? performance.benchmarkComparisons
-    : [];
-  const primaryComparison = benchmarkComparisons.find((item) =>
-    String(item?.symbol || "").toUpperCase() === String(risk?.benchmarkSymbol || "").toUpperCase(),
-  ) || benchmarkComparisons[0];
-  const alphaObservationCount = Number(primaryComparison?.observationCount);
-  const alphaNeedsMoreHistory = risk.alpha == null
-    && Number.isFinite(alphaObservationCount)
-    && alphaObservationCount < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
-  const betaNeedsMoreHistory = risk.beta == null
-    && Number.isFinite(alphaObservationCount)
-    && alphaObservationCount < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
-
   return [
     {
       id: "realtime",
@@ -459,7 +607,7 @@ function buildLiveCategories(payload) {
       eyebrow: "Live Snapshot",
       accent: "#1f4ed8",
       pnl: {
-        value: formatCurrency(realtime.todayPnl, reportingCurrency),
+        value: formatCurrency(todayPnlValue, reportingCurrency),
         detail: `Mark-to-market · As of ${asOf}`,
       },
       metrics: [
@@ -476,10 +624,11 @@ function buildLiveCategories(payload) {
           detail: "Available cash",
         },
         {
-          key: "availableFunds",
-          label: "Available Funds",
-          value: formatCurrency(realtime.availableFunds, reportingCurrency),
-          detail: "Post-settlement",
+          key: "currentProfit",
+          label: "Current Profit",
+          value: formatCurrency(realtimeCurrentProfit, reportingCurrency),
+          detail: "Unrealized P&L",
+          valueColor: currentProfitTone,
         },
         {
           key: "holdings",
@@ -498,22 +647,26 @@ function buildLiveCategories(payload) {
         {
           key: "totalReturn",
           label: "Total Return",
-          value: formatSignedPercent(performance.totalReturn),
+          value: formatSignedPercent(fallbackTotalReturn),
           detail: "Since inception",
         },
         {
           key: "annualizedReturn",
           label: "Annualized Return",
-          value: formatSignedPercent(performance.annualizedReturn),
-          detail: annualizedNeedsMoreHistory
-            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} daily returns`
-            : "CAGR",
+          value: formatSignedPercent(effectiveAnnualizedReturn),
+          detail: Number.isFinite(performance.annualizedReturn)
+            ? "CAGR"
+            : ((derivedMetrics?.returnCount ?? 0) < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA
+              ? `Using Total Return (${fallbackDays}D window)`
+              : `Annualized from ${fallbackDays} trading days`),
         },
         {
           key: "timeWeightedReturn",
           label: "Time-Weighted Return",
-          value: formatSignedPercent(performance.timeWeightedReturn),
-          detail: "TWR adjusted",
+          value: formatSignedPercent(effectiveTwr),
+          detail: Number.isFinite(performance.timeWeightedReturn)
+            ? "TWR adjusted"
+            : `TWR (${fallbackDays}D window)`,
         },
       ],
     },
@@ -526,8 +679,10 @@ function buildLiveCategories(payload) {
         {
           key: "annualizedVolatility",
           label: "Annualized Volatility",
-          value: formatPercent(risk.annualizedVolatility),
-          detail: "1Y rolling",
+          value: formatPercent(risk.annualizedVolatility ?? derivedMetrics?.annualizedVolatility ?? 0),
+          detail: risk.annualizedVolatility == null
+            ? `Computed / default (${fallbackDays}D)`
+            : "1Y rolling",
         },
         {
           key: "maxDrawdown",
@@ -538,24 +693,20 @@ function buildLiveCategories(payload) {
         {
           key: "sharpeRatio",
           label: "Sharpe Ratio",
-          value: toFixed(risk.sharpeRatio, 2),
-          detail: "Risk-adjusted",
+          value: toFixed(risk.sharpeRatio ?? derivedMetrics?.sharpeRatio ?? 0, 2),
+          detail: risk.sharpeRatio == null ? `Computed / default (${fallbackDays}D)` : "Risk-adjusted",
         },
         {
           key: "beta",
           label: "Beta",
-          value: toFixed(risk.beta, 2),
-          detail: betaNeedsMoreHistory
-            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} overlapped returns`
-            : "vs benchmark",
+          value: toFixed(risk.beta ?? derivedMetrics?.beta ?? 1, 2),
+          detail: risk.beta == null ? `Computed / default (${fallbackDays}D)` : "vs benchmark",
         },
         {
           key: "alpha",
           label: "Alpha",
-          value: formatSignedPercent(risk.alpha),
-          detail: alphaNeedsMoreHistory
-            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} overlapped returns`
-            : "Annual excess",
+          value: formatSignedPercent(risk.alpha ?? derivedMetrics?.alpha ?? 0),
+          detail: risk.alpha == null ? `Computed / default (${fallbackDays}D)` : "Annual excess",
         },
         {
           key: "riskFreeRate",
@@ -658,6 +809,11 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
     () => buildDonutSegments(dashboardPayload),
     [dashboardPayload],
   );
+  const reportingCurrency = useMemo(() => {
+    const realtime = dashboardPayload?.realtime || {};
+    const metaSection = dashboardPayload?.meta || {};
+    return metaSection.reportingCurrency || realtime.reportingCurrency || "USD";
+  }, [dashboardPayload]);
   const benchmarkChartModel = useMemo(
     () => buildBenchmarkChartModel(dashboardPayload),
     [dashboardPayload],
@@ -700,6 +856,7 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
     const metaSection = dashboardPayload?.meta || {};
     const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "USD";
     const totalValue = toNumber(realtime.holdingMarketValue, 0) + toNumber(realtime.cashBalance, 0);
+    const todayPnlValue = resolveTodayPnlValue(realtime);
 
     return {
       ...meta,
@@ -712,7 +869,7 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         },
         {
           label: "Today's P&L",
-          value: formatCurrency(realtime.todayPnl, reportingCurrency),
+          value: formatCurrency(todayPnlValue, reportingCurrency),
           detail: "Mark-to-market",
         },
         {
@@ -847,6 +1004,94 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
           : null,
     }));
   }, [liveHoldings]);
+  const capitalAllocation = useMemo(() => {
+    const realtime = dashboardPayload?.realtime || {};
+    const holdingsValueFromRows = enrichedHoldings.reduce((sum, holding) => (
+      Number.isFinite(Number(holding.marketValue)) && Number(holding.marketValue) > 0
+        ? sum + Number(holding.marketValue)
+        : sum
+    ), 0);
+    const holdingsValue = holdingsValueFromRows > 0
+      ? holdingsValueFromRows
+      : toNumber(realtime.holdingMarketValue, 0);
+    const cashValue = toNumber(realtime.cashBalance, 0);
+    const portfolioValue = holdingsValue + cashValue;
+
+    const segments = portfolioValue > 0
+      ? [
+        {
+          label: "Invested Holdings",
+          amount: holdingsValue,
+          pct: Number(((holdingsValue / portfolioValue) * 100).toFixed(2)),
+          color: "#4f7bff",
+        },
+        {
+          label: "Cash / Uninvested",
+          amount: cashValue,
+          pct: Number(((cashValue / portfolioValue) * 100).toFixed(2)),
+          color: "#7bd88f",
+        },
+      ]
+      : [];
+
+    return {
+      holdingsValue,
+      portfolioValue,
+      segments,
+    };
+  }, [dashboardPayload, enrichedHoldings]);
+  const symbolAllocationSegments = useMemo(() => {
+    const ranked = enrichedHoldings
+      .filter((holding) => Number.isFinite(Number(holding.marketValue)) && Number(holding.marketValue) > 0)
+      .sort((a, b) => Number(b.marketValue) - Number(a.marketValue));
+
+    if (!ranked.length) {
+      return [];
+    }
+
+    const total = ranked.reduce((sum, holding) => sum + Number(holding.marketValue), 0);
+    if (total <= 0) {
+      return [];
+    }
+
+    const top = ranked.slice(0, 7).map((holding, index) => {
+      const amount = Number(holding.marketValue);
+      return {
+        label: holding.symbol || `Asset ${index + 1}`,
+        amount,
+        pct: Number(((amount / total) * 100).toFixed(2)),
+        color: DONUT_COLORS[index % DONUT_COLORS.length],
+      };
+    });
+
+    if (ranked.length > 7) {
+      const otherAmount = ranked
+        .slice(7)
+        .reduce((sum, holding) => sum + Number(holding.marketValue || 0), 0);
+      if (otherAmount > 0) {
+        top.push({
+          label: "Other",
+          amount: otherAmount,
+          pct: Number(((otherAmount / total) * 100).toFixed(2)),
+          color: DONUT_COLORS[top.length % DONUT_COLORS.length],
+        });
+      }
+    }
+
+    return top;
+  }, [enrichedHoldings]);
+  const industryAllocationSegments = useMemo(() => {
+    const holdingsValue = capitalAllocation.holdingsValue;
+    return (Array.isArray(donutSegments) ? donutSegments : []).map((segment, index) => {
+      const pct = Number(segment?.pct || 0);
+      return {
+        label: segment?.label || `Sector ${index + 1}`,
+        pct,
+        amount: holdingsValue > 0 ? Number(((pct / 100) * holdingsValue).toFixed(2)) : null,
+        color: segment?.color || DONUT_COLORS[index % DONUT_COLORS.length],
+      };
+    });
+  }, [capitalAllocation.holdingsValue, donutSegments]);
 
   function goToPrevCategory() {
     const nextIndex = activeCategoryIndex <= 0 ? categories.length - 1 : activeCategoryIndex - 1;
@@ -881,7 +1126,10 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         benchmarkPoints={benchmarkChartModel.benchmarkPoints}
         benchmarkLabels={benchmarkChartModel.benchmarkLabels}
         benchmarkMeta={benchmarkChartModel.benchmarkMeta}
-        donutSegments={donutSegments}
+        industryDonutSegments={industryAllocationSegments}
+        symbolAllocationSegments={symbolAllocationSegments}
+        capitalSplitSegments={capitalAllocation.segments}
+        reportingCurrency={reportingCurrency}
       />
       <div className="stock-bottom-grid">
         <section className="feature-card" style={{ padding: 18 }}>
