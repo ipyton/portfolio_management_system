@@ -146,7 +146,11 @@ public class TwelveDataClient {
                     ));
                 }
 
-                items.sort(Comparator.comparing(AssetCandleHistoryItem::tradeDate));
+                items.sort(
+                        Comparator
+                                .comparing(AssetCandleHistoryItem::tradeDate)
+                                .thenComparing(item -> item.tradeDateTime() == null ? "" : item.tradeDateTime())
+                );
                 return items;
             } catch (IOException | RestClientException ex) {
                 throw new TwelveDataLookupException("Failed to fetch Twelve Data history for symbol: " + symbol, ex);

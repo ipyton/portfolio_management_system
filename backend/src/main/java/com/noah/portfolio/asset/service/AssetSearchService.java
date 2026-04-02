@@ -466,7 +466,7 @@ public class AssetSearchService {
                         startDate,
                         endDate
                 );
-        if (!cachedItems.isEmpty() && !candleCacheNeedsRefresh(cachedItems, endDate, normalizedInterval)) {
+        if (!cachedItems.isEmpty() && !candleCacheNeedsRefresh(cachedItems, startDate, endDate, normalizedInterval)) {
             return new AssetCandleHistoryResponse(
                     normalizedQuery,
                     resolvedSymbol,
@@ -588,14 +588,19 @@ public class AssetSearchService {
 
     private boolean candleCacheNeedsRefresh(
             List<AssetCandleHistoryItem> cachedItems,
+            LocalDate startDate,
             LocalDate endDate,
             String interval
     ) {
         if (cachedItems == null || cachedItems.isEmpty()) {
             return true;
         }
+        LocalDate earliestTradeDate = cachedItems.get(0).tradeDate();
         LocalDate latestTradeDate = cachedItems.get(cachedItems.size() - 1).tradeDate();
-        if (latestTradeDate == null) {
+        if (earliestTradeDate == null || latestTradeDate == null) {
+            return true;
+        }
+        if (startDate != null && earliestTradeDate.isAfter(startDate)) {
             return true;
         }
         LocalDate staleThreshold = endDate.minusDays(candleStaleToleranceDays(interval));
