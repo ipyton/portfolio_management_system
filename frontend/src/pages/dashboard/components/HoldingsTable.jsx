@@ -1,7 +1,20 @@
 import React from "react";
+import { formatCurrency } from "../../../lib/api";
 
 function fmtCurrency(value) {
-  return `$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "N/A";
+  }
+  return formatCurrency(Math.abs(numeric), "USD");
+}
+
+function fmtUsd(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "N/A";
+  }
+  return formatCurrency(numeric, "USD");
 }
 
 export const HOLDING_COLUMN_OPTIONS = [
@@ -88,14 +101,19 @@ export default function HoldingsTable({
                 <td style={{ background: isSelectedColumn("symbol") ? "rgba(79,123,255,0.04)" : "transparent" }}>{holding.symbol}</td>
                 <td style={{ background: isSelectedColumn("companyName") ? "rgba(79,123,255,0.04)" : "transparent" }}>{holding.companyName}</td>
                 <td style={{ background: isSelectedColumn("label") ? "rgba(79,123,255,0.04)" : "transparent" }}>{holding.label}</td>
-                <td style={{ background: isSelectedColumn("shares") ? "rgba(79,123,255,0.04)" : "transparent" }}>{holding.shares}</td>
-                <td style={{ background: isSelectedColumn("currentPrice") ? "rgba(79,123,255,0.04)" : "transparent" }}>${holding.currentPrice.toFixed(2)}</td>
-                <td style={{ background: isSelectedColumn("costBasis") ? "rgba(79,123,255,0.04)" : "transparent" }}>${holding.costBasis.toFixed(2)}</td>
-                <td style={{ background: isSelectedColumn("marketValue") ? "rgba(79,123,255,0.04)" : "transparent" }}>${holding.marketValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                <td style={{ background: isSelectedColumn("allocation") ? "rgba(79,123,255,0.04)" : "transparent" }}>{holding.allocation.toFixed(2)}%</td>
-                <td style={{ background: isSelectedColumn("pnl") ? "rgba(79,123,255,0.04)" : "transparent", color: holding.pnl >= 0 ? "#16a34a" : "#dc2626", fontWeight: 700 }}>
-                  {holding.pnl >= 0 ? "+" : "-"}
-                  {fmtCurrency(holding.pnl)}
+                <td style={{ background: isSelectedColumn("shares") ? "rgba(79,123,255,0.04)" : "transparent" }}>
+                  {Number.isFinite(Number(holding.shares)) ? Number(holding.shares).toFixed(2) : "N/A"}
+                </td>
+                <td style={{ background: isSelectedColumn("currentPrice") ? "rgba(79,123,255,0.04)" : "transparent" }}>{fmtUsd(holding.currentPrice)}</td>
+                <td style={{ background: isSelectedColumn("costBasis") ? "rgba(79,123,255,0.04)" : "transparent" }}>{fmtUsd(holding.costBasis)}</td>
+                <td style={{ background: isSelectedColumn("marketValue") ? "rgba(79,123,255,0.04)" : "transparent" }}>{fmtUsd(holding.marketValue)}</td>
+                <td style={{ background: isSelectedColumn("allocation") ? "rgba(79,123,255,0.04)" : "transparent" }}>
+                  {Number.isFinite(Number(holding.allocation)) ? `${Number(holding.allocation).toFixed(2)}%` : "N/A"}
+                </td>
+                <td style={{ background: isSelectedColumn("pnl") ? "rgba(79,123,255,0.04)" : "transparent", color: Number.isFinite(Number(holding.pnl)) ? (holding.pnl >= 0 ? "#16a34a" : "#dc2626") : "inherit", fontWeight: 700 }}>
+                  {Number.isFinite(Number(holding.pnl))
+                    ? `${holding.pnl >= 0 ? "+" : "-"}${fmtCurrency(holding.pnl)}`
+                    : "N/A"}
                 </td>
               </tr>
             );

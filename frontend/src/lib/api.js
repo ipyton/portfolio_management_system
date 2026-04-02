@@ -2,6 +2,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const REQUEST_KEY_HEADER =
   import.meta.env.VITE_REQUEST_KEY_HEADER || "X-Request-Key";
 const AUTH_PASSWORD_STORAGE_KEY = "portfolio-auth-password";
+const USD_CURRENCY_CODE = "USD";
 
 function getSessionStorage() {
   if (typeof window === "undefined") {
@@ -147,6 +148,48 @@ export async function mockCashWithdraw(requestBody) {
     method: "POST",
     body: requestBody,
   });
+}
+
+function normalizeCurrencyCode(currency) {
+  const normalized = String(currency || "").trim().toUpperCase();
+  return normalized || null;
+}
+
+export async function fetchFxLatest(quoteCurrency = USD_CURRENCY_CODE) {
+  const normalizedQuote = normalizeCurrencyCode(quoteCurrency) || USD_CURRENCY_CODE;
+  return apiFetch(`/api/fx/latest?quoteCurrency=${encodeURIComponent(normalizedQuote)}`);
+}
+
+export function buildFxRateMap(snapshot, quoteCurrency = USD_CURRENCY_CODE) {
+  const normalizedQuote = normalizeCurrencyCode(quoteCurrency) || USD_CURRENCY_CODE;
+  const fxRateMap = { [normalizedQuote]: 1 };
+  const rates = Array.isArray(snapshot?.rates) ? snapshot.rates : [];
+  rates.forEach((item) => {
+    const baseCurrency = normalizeCurrencyCode(item?.baseCurrency);
+    const rate = Number(item?.rate);
+    if (!baseCurrency || !Number.isFinite(rate) || rate <= 0) {
+      return;
+    }
+    fxRateMap[baseCurrency] = rate;
+  });
+  return fxRateMap;
+}
+
+export function convertAmountByFx(value, fromCurrency, fxRateMap, quoteCurrency = USD_CURRENCY_CODE) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  const normalizedQuote = normalizeCurrencyCode(quoteCurrency) || USD_CURRENCY_CODE;
+  const normalizedFrom = normalizeCurrencyCode(fromCurrency) || normalizedQuote;
+  if (normalizedFrom === normalizedQuote) {
+    return numeric;
+  }
+  const rate = Number(fxRateMap?.[normalizedFrom]);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return null;
+  }
+  return numeric * rate;
 }
 
 export function formatCurrency(value, currency = "USD") {

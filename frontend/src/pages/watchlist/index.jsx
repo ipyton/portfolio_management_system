@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  buildFxRateMap,
+  convertAmountByFx,
   DEFAULT_USER_ID,
   apiFetch,
+  fetchFxLatest,
   formatCurrency,
   formatDate,
   formatSignedPercent,
@@ -28,6 +31,7 @@ export const watchlistActivityFeed = [
 
 const HISTORY_LOOKBACK_DAYS = 180;
 const FAV_STORAGE_KEY = `watchlist-favourites-${DEFAULT_USER_ID}`;
+const USD_CURRENCY = "USD";
 
 const toFiniteNumber = (value, fallback = 0) => {
   const normalized = Number(value);
@@ -76,7 +80,7 @@ function normalizeHorizonMonths(daysCount) {
   return 1;
 }
 
-function computeHistoryInsights(history, currency) {
+function computeHistoryInsights(history, currency, fxRateMap) {
   if (!history?.length) {
     return null;
   }
@@ -89,6 +93,8 @@ function computeHistoryInsights(history, currency) {
 
   const prev = Number(history[history.length - 2]?.price);
   const dailyChange = Number.isFinite(prev) ? last - prev : null;
+  const dailyChangeUsd = dailyChange === null ? null : convertAmountByFx(dailyChange, currency, fxRateMap, USD_CURRENCY);
+  const lastPriceUsd = convertAmountByFx(last, currency, fxRateMap, USD_CURRENCY);
   const dailyChangePercent = Number.isFinite(prev) && prev > 0 ? last / prev - 1 : null;
   const totalReturn = last / first - 1;
 
@@ -137,25 +143,32 @@ function computeHistoryInsights(history, currency) {
     returns: {
       Daily: formatSignedPercent(dailyChangePercent),
       Change:
-        dailyChange === null
+        dailyChangeUsd === null
           ? "N/A"
-          : `${dailyChange > 0 ? "+" : ""}${dailyChange.toFixed(2)}`,
+          : `${dailyChangeUsd > 0 ? "+" : ""}${formatCurrency(dailyChangeUsd, USD_CURRENCY)}`,
       Total: formatSignedPercent(totalReturn),
-      Price: formatCurrency(last, currency || "USD"),
+      Price: lastPriceUsd === null ? "N/A" : formatCurrency(lastPriceUsd, USD_CURRENCY),
     },
   };
 }
 
-function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite) {
+function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite, fxRateMap) {
   const symbol = item?.symbol || "UNKNOWN";
   const latestClose = toFiniteNumber(item?.latestClose, 0);
+  const latestCloseUsd = convertAmountByFx(latestClose, item?.currency, fxRateMap, USD_CURRENCY);
   const dailyChange = item?.dailyChange;
+  const dailyChangeUsd = dailyChange === null || dailyChange === undefined
+    ? null
+    : convertAmountByFx(dailyChange, item?.currency, fxRateMap, USD_CURRENCY);
   const dailyChangeText =
-    dailyChange === null || dailyChange === undefined
+    dailyChangeUsd === null
       ? "N/A"
-      : `${dailyChange > 0 ? "+" : ""}${toFiniteNumber(dailyChange).toFixed(2)}`;
+      : `${dailyChangeUsd > 0 ? "+" : ""}${formatCurrency(dailyChangeUsd, USD_CURRENCY)}`;
   const dailyChangePercentText = formatSignedPercent(item?.dailyChangePercent);
   const holdingShares = toFiniteNumber(holdingItem?.quantity, existingRow?.holdingShares || 0);
+  const historyInsights = existingRow?.priceHistory?.length
+    ? computeHistoryInsights(existingRow.priceHistory, item?.currency || existingRow?.currency, fxRateMap)
+    : null;
 
   return {
     watchlistId: item?.watchlistId ?? null,
@@ -167,20 +180,20 @@ function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite) {
     isFavourite: Boolean(isFavourite),
     popularity: existingRow?.popularity || 0,
     salesVolume: existingRow?.salesVolume || 0,
-    horizonMonths: existingRow?.horizonMonths || 1,
+    horizonMonths: historyInsights?.horizonMonths || existingRow?.horizonMonths || 1,
     holdingShares,
-    returnPct: existingRow?.returnPct || dailyChangePercentText,
-    returns: existingRow?.returns || {
+    returnPct: historyInsights?.returnPct || existingRow?.returnPct || dailyChangePercentText,
+    returns: historyInsights?.returns || existingRow?.returns || {
       Daily: dailyChangePercentText,
       Change: dailyChangeText,
-      Price: formatCurrency(latestClose, item?.currency || "USD"),
+      Price: latestCloseUsd === null ? "N/A" : formatCurrency(latestCloseUsd, USD_CURRENCY),
     },
     cadence: item?.latestTradeDate
       ? `Last Trade ${formatDate(item.latestTradeDate)}`
       : "Last Trade N/A",
-    sharpe: existingRow?.sharpe || "N/A",
+    sharpe: historyInsights?.sharpe || existingRow?.sharpe || "N/A",
     horizon: item?.latestTradeDate ? formatDate(item.latestTradeDate) : "N/A",
-    drawdown: existingRow?.drawdown || "N/A",
+    drawdown: historyInsights?.drawdown || existingRow?.drawdown || "N/A",
     currency: item?.currency || "USD",
     exchange: item?.exchange || "UNKNOWN",
     region: item?.region || "UNKNOWN",
@@ -192,6 +205,7 @@ function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite) {
     latestTradeDate: item?.latestTradeDate || null,
     dailyChange: item?.dailyChange ?? null,
     dailyChangePercent: item?.dailyChangePercent ?? null,
+    latestCloseUsd,
     addedAt: item?.addedAt || null,
     note: item?.note || "",
     priceHistory: existingRow?.priceHistory || [],
@@ -221,6 +235,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [cashByCurrency, setCashByCurrency] = useState({});
+  const [fxRateMap, setFxRateMap] = useState({ USD: 1 });
   const rowsRef = useRef(rows);
   const loadedHistorySymbolsRef = useRef(new Set());
   const loadingHistorySymbolsRef = useRef(new Set());
@@ -235,6 +250,19 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       return false;
     },
     [isLoggedIn],
+  );
+
+  const toUsdAmount = useCallback(
+    (value, sourceCurrency) => convertAmountByFx(value, sourceCurrency, fxRateMap, USD_CURRENCY),
+    [fxRateMap],
+  );
+
+  const formatUsdValue = useCallback(
+    (value, sourceCurrency) => {
+      const converted = toUsdAmount(value, sourceCurrency);
+      return converted === null ? "N/A" : formatCurrency(converted, USD_CURRENCY);
+    },
+    [toUsdAmount],
   );
 
   const cashBalance = useMemo(() => {
@@ -274,6 +302,9 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     ? selected.holdingShares * latestPrice
     : 0;
   const calculatedCash = tradeAmount ? Number(tradeAmount) * latestPrice : 0;
+  const cashBalanceDisplay = formatUsdValue(cashBalance, selected?.currency);
+  const stockCashValueDisplay = formatUsdValue(stockCashValue, selected?.currency);
+  const calculatedCashDisplay = formatUsdValue(calculatedCash, selected?.currency);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -292,11 +323,16 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     setError("");
 
     try {
-      const [watchlistResponse, holdingsResponse, cashResponse] = await Promise.all([
+      const [watchlistResponse, holdingsResponse, cashResponse, fxResponse] = await Promise.all([
         apiFetch(`/api/watchlists?userId=${DEFAULT_USER_ID}`),
         apiFetch(`/api/holdings?userId=${DEFAULT_USER_ID}`).catch(() => ({ items: [] })),
         apiFetch(`/api/cash-accounts?userId=${DEFAULT_USER_ID}`).catch(() => ({ items: [] })),
+        fetchFxLatest(USD_CURRENCY).catch(() => null),
       ]);
+      const nextFxRateMap = fxResponse ? buildFxRateMap(fxResponse, USD_CURRENCY) : { USD: 1 };
+      if (fxResponse) {
+        setFxRateMap(nextFxRateMap);
+      }
 
       const previousBySymbol = new Map(
         rowsRef.current.map((row) => [row.symbol.toUpperCase(), row]),
@@ -314,6 +350,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           previous,
           holdingBySymbol.get(symbolKey),
           favouriteSymbols.has(symbolKey) || previous?.isFavourite,
+          nextFxRateMap,
         );
       });
 
@@ -357,7 +394,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         if (String(row.symbol || "").toUpperCase() !== symbolKey) {
           return row;
         }
-        const insights = computeHistoryInsights(history, row.currency);
+        const insights = computeHistoryInsights(history, row.currency, fxRateMap);
         return {
           ...row,
           priceHistory: history,
@@ -369,14 +406,14 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       if (!current || String(current.symbol || "").toUpperCase() !== symbolKey) {
         return current;
       }
-      const insights = computeHistoryInsights(history, current.currency);
+      const insights = computeHistoryInsights(history, current.currency, fxRateMap);
       return {
         ...current,
         priceHistory: history,
         ...(insights || {}),
       };
     });
-  }, []);
+  }, [fxRateMap]);
 
   const hydrateHistoryForSymbol = useCallback(async (symbol, reportError = false) => {
     const symbolKey = String(symbol || "").toUpperCase();
@@ -502,7 +539,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         method: "POST",
         body: payload,
       });
-      const row = mapWatchlistItemToRow(created, null, null, false);
+      const row = mapWatchlistItemToRow(created, null, null, false, fxRateMap);
       setRows((currentRows) => [row, ...currentRows.filter((item) => item.symbol !== row.symbol)]);
       setSelected(row);
       setNotice(`${row.symbol} has been added to watchlist.`);
@@ -515,7 +552,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     } finally {
       setSavingSymbol("");
     }
-  }, [loadWatchlist, requireLogin]);
+  }, [fxRateMap, loadWatchlist, requireLogin]);
 
   const removeSelectedFromWatchlist = useCallback(async () => {
     if (!requireLogin("remove symbols from watchlist")) {
@@ -601,8 +638,10 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       });
 
       const side = tradeModal.type === "buy" ? "buy" : "sell";
+      const usdPrice = toUsdAmount(normalizedPrice, selected?.currency);
+      const displayPrice = usdPrice === null ? "N/A" : formatCurrency(usdPrice, USD_CURRENCY);
       setConfirmation(
-        `${selected.symbol} ${side} order submitted: ${normalizedQuantity.toFixed(4)} shares @ ${normalizedPrice.toFixed(4)}.`,
+        `${selected.symbol} ${side} order submitted: ${normalizedQuantity.toFixed(4)} shares @ ${displayPrice}.`,
       );
       setTradeModal({ open: false, type: null });
       setTradeAmount("");
@@ -622,6 +661,8 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     latestPrice,
     loadWatchlist,
     requireLogin,
+    selected?.currency,
+    toUsdAmount,
   ]);
 
   const hasBondRows = useMemo(
@@ -760,6 +801,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           selected={selected}
           isRemoving={savingSymbol === selected?.symbol}
           interactionDisabled={!isLoggedIn}
+          toUsdAmount={toUsdAmount}
           onRemove={removeSelectedFromWatchlist}
           onToggleFavourite={(symbol) => {
             if (!requireLogin("toggle favourites")) {
@@ -799,11 +841,11 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         setTradeAmount={setTradeAmount}
         tradeCashAmount={tradeCashAmount}
         setTradeCashAmount={setTradeCashAmount}
-        cashBalance={cashBalance}
+        cashBalanceDisplay={cashBalanceDisplay}
         isOverBalance={isOverBalance}
         isOverHolding={isOverHolding}
-        stockCashValue={stockCashValue}
-        calculatedCash={calculatedCash}
+        stockCashValueDisplay={stockCashValueDisplay}
+        calculatedCashDisplay={calculatedCashDisplay}
         confirmation={confirmation}
         setConfirmation={setConfirmation}
         onConfirmTrade={submitTrade}

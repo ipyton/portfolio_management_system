@@ -43,6 +43,7 @@ import com.noah.portfolio.asset.model.AssetType;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.asset.repository.AssetRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
+import com.noah.portfolio.asset.service.AssetMetadataEnrichmentService;
 import com.noah.portfolio.asset.service.AssetSearchService;
 
 class AssetSearchServiceTest {
@@ -82,7 +83,8 @@ class AssetSearchServiceTest {
                 finnhubClient,
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetSuggestionResponse response = service.suggest("  App  ", 2);
@@ -139,7 +141,8 @@ class AssetSearchServiceTest {
                 finnhubClient,
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetSearchResponse response = service.search("AAPL");
@@ -183,7 +186,8 @@ class AssetSearchServiceTest {
                 finnhubClient,
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetSearchResponse response = service.search("microsoft");
@@ -216,7 +220,8 @@ class AssetSearchServiceTest {
                 finnhubClient,
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetSuggestionResponse response = service.suggest("a", 3);
@@ -252,7 +257,8 @@ class AssetSearchServiceTest {
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetRecommendationResponse response = service.recommend("conservative", 3, 120);
@@ -279,7 +285,8 @@ class AssetSearchServiceTest {
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
                 mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
-                mock(EastmoneyClient.class)
+                mock(EastmoneyClient.class),
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         org.junit.jupiter.api.Assertions.assertThrows(
@@ -322,7 +329,8 @@ class AssetSearchServiceTest {
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
                 yahooFinanceClient,
                 twelveDataClient,
-                eastmoneyClient
+                eastmoneyClient,
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetPriceHistoryResponse response = service.priceHistory("SPX", 30);
@@ -367,7 +375,8 @@ class AssetSearchServiceTest {
                 finnhubClient,
                 yahooFinanceClient,
                 twelveDataClient,
-                eastmoneyClient
+                eastmoneyClient,
+                mock(AssetMetadataEnrichmentService.class)
         );
 
         AssetPriceHistoryResponse response = service.priceHistory("SPX", 30);

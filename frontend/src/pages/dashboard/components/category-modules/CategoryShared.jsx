@@ -217,14 +217,31 @@ export function PnlSparkline({ points, labels }) {
 }
 
 export function DonutChart({ segments }) {
+  const safeSegments = Array.isArray(segments) ? segments : [];
+  if (!safeSegments.length) {
+    return null;
+  }
+
+  const normalizedTotal = safeSegments.reduce((sum, segment) => sum + Number(segment?.pct || 0), 0);
+  const singleFullSegment = safeSegments.length === 1 && normalizedTotal >= 99.999;
   const r = 60;
   const inner = 38;
   const center = 80;
   let total = 0;
 
+  if (singleFullSegment) {
+    const color = safeSegments[0]?.color || "#4f7bff";
+    return (
+      <svg viewBox="0 0 160 160" style={{ width: 180, maxWidth: "100%", height: "auto" }}>
+        <circle cx={center} cy={center} r={r} fill={color} />
+        <circle cx={center} cy={center} r={inner} fill="#ffffff" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 160 160" style={{ width: 180, maxWidth: "100%", height: "auto" }}>
-      {segments.map((segment) => {
+      {safeSegments.map((segment) => {
         const start = (total / 100) * Math.PI * 2 - Math.PI / 2;
         total += segment.pct;
         const end = (total / 100) * Math.PI * 2 - Math.PI / 2;

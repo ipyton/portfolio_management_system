@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  buildFxRateMap,
+  convertAmountByFx,
   DEFAULT_USER_ID,
+  fetchFxLatest,
   fetchCashBalances,
   fetchCashTransactions,
   formatCurrency,
@@ -21,29 +24,6 @@ const DEFAULT_CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function formatNumber(value, digits = 2) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return "N/A";
-  }
-  return numeric.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: 6,
-  });
-}
-
-function formatCashValue(value, currency) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return "N/A";
-  }
-  try {
-    return formatCurrency(numeric, currency || "USD");
-  } catch {
-    return `${formatNumber(numeric)} ${currency || ""}`.trim();
-  }
 }
 
 function formatDateTime(value) {
@@ -85,6 +65,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
+  const [fxRateMap, setFxRateMap] = useState({ USD: 1 });
 
   const [actionType, setActionType] = useState("deposit");
   const [formCurrency, setFormCurrency] = useState("USD");
@@ -100,21 +81,33 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
     return [...new Set([...DEFAULT_CURRENCIES, ...dynamicCurrencies])];
   }, [balances, transactions]);
 
+  const formatUsdValue = useCallback(
+    (value, sourceCurrency) => {
+      const converted = convertAmountByFx(value, sourceCurrency, fxRateMap, "USD");
+      return converted === null ? "N/A" : formatCurrency(converted, "USD");
+    },
+    [fxRateMap],
+  );
+
   const refreshData = useCallback(
     async (nextFilter) => {
       setLoading(true);
       setError("");
       try {
-        const [balanceResponse, transactionResponse] = await Promise.all([
+        const [balanceResponse, transactionResponse, fxResponse] = await Promise.all([
           fetchCashBalances(userId),
           fetchCashTransactions({
             userId,
             currency: nextFilter === "ALL" ? undefined : nextFilter,
           }),
+          fetchFxLatest("USD").catch(() => null),
         ]);
 
         setBalances(Array.isArray(balanceResponse?.items) ? balanceResponse.items : []);
         setTransactions(Array.isArray(transactionResponse?.items) ? transactionResponse.items : []);
+        if (fxResponse) {
+          setFxRateMap(buildFxRateMap(fxResponse, "USD"));
+        }
         setLastUpdated(new Date().toISOString());
       } catch (requestError) {
         setError(requestError?.message || "Failed to load cash account data.");
@@ -169,9 +162,10 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
           : await mockCashDeposit(payload);
 
       const verb = actionType === "withdraw" ? "Withdraw" : "Deposit";
+      const sourceCurrency = response?.currency || normalizedCurrency;
       setSuccess(
-        `${verb} success: ${response?.currency || normalizedCurrency} ${formatNumber(response?.amount)}. `
-        + `Available ${formatNumber(response?.availableBalanceBefore)} -> ${formatNumber(response?.availableBalanceAfter)}.`,
+        `${verb} success: ${formatUsdValue(response?.amount, sourceCurrency)}. `
+        + `Available ${formatUsdValue(response?.availableBalanceBefore, sourceCurrency)} -> ${formatUsdValue(response?.availableBalanceAfter, sourceCurrency)}.`,
       );
 
       setAmount("");
@@ -286,12 +280,12 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                 {balances.map((item) => (
                   <article key={`${item.cashAccountId || item.currency}-${item.currency}`} className="cash-balance-item">
                     <header>
-                      <strong>{item.currency || "N/A"}</strong>
-                      <span>ID {item.cashAccountId || "-"}</span>
+                      <strong>USD View</strong>
+                      <span>{item.currency || "N/A"} · ID {item.cashAccountId || "-"}</span>
                     </header>
-                    <p>Available: {formatCashValue(item.availableBalance, item.currency)}</p>
-                    <p>Total: {formatCashValue(item.balance, item.currency)}</p>
-                    <p>Frozen: {formatCashValue(item.frozenBalance, item.currency)}</p>
+                    <p>Available: {formatUsdValue(item.availableBalance, item.currency)}</p>
+                    <p>Total: {formatUsdValue(item.balance, item.currency)}</p>
+                    <p>Frozen: {formatUsdValue(item.frozenBalance, item.currency)}</p>
                   </article>
                 ))}
               </div>
@@ -328,9 +322,9 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                 <tr>
                   <th>Time</th>
                   <th>Type</th>
-                  <th>Currency</th>
-                  <th>Amount</th>
-                  <th>Available After</th>
+                  <th>Source Currency</th>
+                  <th>Amount (USD)</th>
+                  <th>Available After (USD)</th>
                   <th>Status</th>
                   <th>BizId</th>
                   <th>Note</th>
@@ -350,9 +344,9 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
                         </td>
                         <td>{item.currency || "N/A"}</td>
                         <td className={isWithdraw ? "negative" : "positive"}>
-                          {formatCashValue(item.amount, item.currency)}
+                          {formatUsdValue(item.amount, item.currency)}
                         </td>
-                        <td>{formatCashValue(item.availableBalanceAfter, item.currency)}</td>
+                        <td>{formatUsdValue(item.availableBalanceAfter, item.currency)}</td>
                         <td>{item.status || "N/A"}</td>
                         <td>{item.bizId || "N/A"}</td>
                         <td>{item.note || "-"}</td>

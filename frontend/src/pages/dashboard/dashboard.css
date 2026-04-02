@@ -363,6 +363,55 @@
   border-radius: 16px;
 }
 
+.dashboard-page .holdings-pie-content {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.dashboard-page .holdings-pie-chart-wrap {
+  display: grid;
+  justify-items: center;
+}
+
+.dashboard-page .holdings-pie-legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-page .holdings-pie-legend-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.dashboard-page .holdings-pie-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.08) inset;
+}
+
+.dashboard-page .holdings-pie-legend-label {
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-page .holdings-pie-legend-value {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .slide-progress-bar {
   height: 100%;
   border-radius: 999px;
@@ -651,6 +700,11 @@
 
   .world-indices-progress {
     width: min(180px, 70vw);
+  }
+
+  .dashboard-page .holdings-pie-content {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 }
 

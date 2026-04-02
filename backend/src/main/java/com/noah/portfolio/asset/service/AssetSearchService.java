@@ -57,6 +57,7 @@ public class AssetSearchService {
     private final YahooFinanceClient yahooFinanceClient;
     private final TwelveDataClient twelveDataClient;
     private final EastmoneyClient eastmoneyClient;
+    private final AssetMetadataEnrichmentService assetMetadataEnrichmentService;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -67,7 +68,8 @@ public class AssetSearchService {
             FinnhubClient finnhubClient,
             YahooFinanceClient yahooFinanceClient,
             TwelveDataClient twelveDataClient,
-            EastmoneyClient eastmoneyClient
+            EastmoneyClient eastmoneyClient,
+            AssetMetadataEnrichmentService assetMetadataEnrichmentService
     ) {
         this.assetSearchDataRepository = assetSearchDataRepository;
         this.assetRepository = assetRepository;
@@ -76,6 +78,7 @@ public class AssetSearchService {
         this.yahooFinanceClient = yahooFinanceClient;
         this.twelveDataClient = twelveDataClient;
         this.eastmoneyClient = eastmoneyClient;
+        this.assetMetadataEnrichmentService = assetMetadataEnrichmentService;
     }
 
     public AssetSearchResponse search(String query) {
@@ -85,11 +88,19 @@ public class AssetSearchService {
                 matchedAssets.stream().map(AssetEntity::getId).toList()
         );
 
-        List<DatabaseAssetDetail> databaseMatches = matchedAssets.stream()
-                .map(asset -> toDatabaseAssetDetail(asset, latestPrices.get(asset.getId())))
-                .toList();
+        List<DatabaseAssetDetail> databaseMatches = buildDatabaseMatches(matchedAssets, latestPrices);
         DatabaseAssetDetail primaryDatabaseMatch = databaseMatches.isEmpty() ? null : databaseMatches.get(0);
         List<String> warnings = new ArrayList<>();
+
+        if (shouldEnrichStockMetadata(primaryDatabaseMatch)
+                && assetMetadataEnrichmentService.enrichStockMetadataBySymbol(primaryDatabaseMatch.symbol())) {
+            matchedAssets = assetSearchDataRepository.searchAssets(normalizedQuery, SEARCH_LIMIT);
+            latestPrices = assetSearchDataRepository.findLatestPriceSnapshots(
+                    matchedAssets.stream().map(AssetEntity::getId).toList()
+            );
+            databaseMatches = buildDatabaseMatches(matchedAssets, latestPrices);
+            primaryDatabaseMatch = databaseMatches.isEmpty() ? null : databaseMatches.get(0);
+        }
 
         String matchedSource;
         String resolvedSymbol;
@@ -469,6 +480,27 @@ public class AssetSearchService {
         );
     }
 
+    private List<DatabaseAssetDetail> buildDatabaseMatches(
+            List<AssetEntity> matchedAssets,
+            Map<Long, AssetLatestPriceSnapshot> latestPrices
+    ) {
+        List<DatabaseAssetDetail> databaseMatches = new ArrayList<>(matchedAssets.size());
+        for (AssetEntity asset : matchedAssets) {
+            databaseMatches.add(toDatabaseAssetDetail(asset, latestPrices.get(asset.getId())));
+        }
+        return databaseMatches;
+    }
+
+    private boolean shouldEnrichStockMetadata(DatabaseAssetDetail detail) {
+        if (detail == null || !StringUtils.hasText(detail.symbol())) {
+            return false;
+        }
+        if (!"STOCK".equalsIgnoreCase(detail.assetType())) {
+            return false;
+        }
+        return !StringUtils.hasText(detail.sector()) && !StringUtils.hasText(detail.industry());
+    }
+
     private AssetCandidate toCandidate(DatabaseAssetDetail detail) {
         return new AssetCandidate(
                 detail.assetId(),
@@ -476,7 +508,7 @@ public class AssetSearchService {
                 detail.name(),
                 detail.assetType(),
                 detail.exchange(),
-                detail.region()
+                firstNonBlank(detail.region(), inferRegion(detail.symbol()))
         );
     }
 
@@ -487,7 +519,7 @@ public class AssetSearchService {
                 asset.getName(),
                 asset.getAssetType().name(),
                 asset.getExchange(),
-                asset.getRegion()
+                firstNonBlank(asset.getRegion(), inferRegion(asset.getSymbol()))
         );
     }
 
@@ -498,7 +530,7 @@ public class AssetSearchService {
                 firstNonBlank(remote.longName(), remote.shortName(), remote.symbol()),
                 remote.quoteType(),
                 remote.exchange(),
-                remote.region()
+                firstNonBlank(remote.region(), inferRegion(remote.symbol()))
         );
     }
 
