@@ -30,9 +30,13 @@ export const watchlistActivityFeed = [
   "Analyst note attached to Semiconductor basket",
 ];
 
-const HISTORY_LOOKBACK_DAYS = 180;
-const CANDLE_LOOKBACK_DAYS = HISTORY_LOOKBACK_DAYS;
 const DEFAULT_CANDLE_INTERVAL = "1day";
+const ONE_DAY_FALLBACK_LOOKBACK_DAYS = 7;
+const CANDLE_RANGE_CONFIG = {
+  "1day": { days: 2, interval: "1h", displayCount: 24 },
+  "1month": { days: 30, interval: "1day" },
+  "1year": { days: 365, interval: "1day" },
+};
 const FAV_STORAGE_KEY = `watchlist-favourites-${DEFAULT_USER_ID}`;
 const USD_CURRENCY = "USD";
 const buildHistoryCacheKey = (symbolKey, interval) => `${symbolKey}|${interval}`;
@@ -468,6 +472,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const hydrateHistoryForSymbol = useCallback(async (symbol, reportError = false) => {
     const symbolKey = String(symbol || "").toUpperCase();
     const requestedInterval = candleInterval;
+    const requestedConfig = CANDLE_RANGE_CONFIG[requestedInterval] || CANDLE_RANGE_CONFIG[DEFAULT_CANDLE_INTERVAL];
     const historyCacheKey = buildHistoryCacheKey(symbolKey, requestedInterval);
     const loadingLabel = `${symbolKey} (${requestedInterval})`;
     if (!symbolKey) {
@@ -490,24 +495,35 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     }
 
     try {
-      const response = await apiFetch(
-        `/api/assets/candles?query=${encodeURIComponent(symbolKey)}&days=${CANDLE_LOOKBACK_DAYS}&interval=${encodeURIComponent(requestedInterval)}`,
-      );
-      const candles = (response?.items || [])
-        .map((item) => ({
-          date: item.tradeDate,
-          open: toFiniteNumber(item.open, NaN),
-          high: toFiniteNumber(item.high, NaN),
-          low: toFiniteNumber(item.low, NaN),
-          close: toFiniteNumber(item.close, NaN),
-        }))
-        .filter((point) => Number.isFinite(point.close));
-      const history = candles
-        .map((point) => ({
-          date: point.date,
-          price: point.close,
-        }))
-        .filter((point) => Number.isFinite(point.price));
+      const fetchCandles = async (days, interval) => {
+        const response = await apiFetch(
+          `/api/assets/candles?query=${encodeURIComponent(symbolKey)}&days=${days}&interval=${encodeURIComponent(interval)}`,
+        );
+        return (response?.items || [])
+          .map((item) => ({
+            date: item.tradeDateTime || item.tradeDate,
+            open: toFiniteNumber(item.open, NaN),
+            high: toFiniteNumber(item.high, NaN),
+            low: toFiniteNumber(item.low, NaN),
+            close: toFiniteNumber(item.close, NaN),
+          }))
+          .filter((point) => Number.isFinite(point.close));
+      };
+
+      let candles = [];
+      try {
+        candles = await fetchCandles(requestedConfig.days, requestedConfig.interval);
+      } catch (primaryError) {
+        if (requestedInterval !== "1day") {
+          throw primaryError;
+        }
+        candles = await fetchCandles(ONE_DAY_FALLBACK_LOOKBACK_DAYS, requestedConfig.interval);
+      }
+
+      if (requestedInterval === "1day" && candles.length === 0) {
+        candles = await fetchCandles(ONE_DAY_FALLBACK_LOOKBACK_DAYS, requestedConfig.interval);
+      }
+
       const validCandles = candles.filter(
         (point) =>
           Number.isFinite(point.open)
@@ -515,12 +531,21 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           && Number.isFinite(point.low)
           && Number.isFinite(point.close),
       );
+      const scopedCandles = requestedConfig.displayCount
+        ? validCandles.slice(-requestedConfig.displayCount)
+        : validCandles;
+      const history = scopedCandles
+        .map((point) => ({
+          date: point.date,
+          price: point.close,
+        }))
+        .filter((point) => Number.isFinite(point.price));
       historyCacheRef.current.set(historyCacheKey, {
         history,
-        candles: validCandles,
+        candles: scopedCandles,
       });
       if (candleIntervalRef.current === requestedInterval) {
-        applyHistoryToSymbol(symbolKey, history, validCandles);
+        applyHistoryToSymbol(symbolKey, history, scopedCandles);
       }
     } catch (requestError) {
       if (reportError) {

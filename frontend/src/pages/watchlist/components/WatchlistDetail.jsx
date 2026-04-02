@@ -38,20 +38,40 @@ const formatChartMonth = (value) => {
   return value.slice(0, 7);
 };
 
+const formatChartHourMinute = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.replace("T", " ");
+  if (normalized.length >= 16) {
+    return normalized.slice(11, 16);
+  }
+  if (normalized.length >= 10) {
+    return normalized.slice(5, 10);
+  }
+  return normalized;
+};
+
 const CANDLE_INTERVAL_OPTIONS = [
   { value: "1day", label: "1D" },
-  { value: "1week", label: "1W" },
   { value: "1month", label: "1M" },
+  { value: "1year", label: "1Y" },
 ];
 
 const formatChartTick = (value, interval) => {
   if (typeof value !== "string") {
     return "";
   }
+  if (interval === "1year") {
+    return formatChartMonth(value);
+  }
   if (interval === "1day") {
+    return formatChartHourMinute(value);
+  }
+  if (interval === "1month") {
     return value.slice(5, 10);
   }
-  return formatChartMonth(value);
+  return value;
 };
 
 export default function WatchlistDetail({

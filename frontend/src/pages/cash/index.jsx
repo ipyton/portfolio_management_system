@@ -62,6 +62,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
   const [balances, setBalances] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -108,6 +109,7 @@ export default function CashPage({ userId = DEFAULT_USER_ID }) {
         if (fxResponse) {
           setFxRateMap(buildFxRateMap(fxResponse, "USD"));
         }
+        setLastUpdated(new Date().toISOString());
       } catch (requestError) {
         setError(requestError?.message || "Failed to load cash account data.");
       } finally {

@@ -5,9 +5,19 @@ import java.time.LocalDate;
 
 public record AssetCandleHistoryItem(
         LocalDate tradeDate,
+        String tradeDateTime,
         BigDecimal open,
         BigDecimal high,
         BigDecimal low,
         BigDecimal close
 ) {
+    public AssetCandleHistoryItem(
+            LocalDate tradeDate,
+            BigDecimal open,
+            BigDecimal high,
+            BigDecimal low,
+            BigDecimal close
+    ) {
+        this(tradeDate, null, open, high, low, close);
+    }
 }

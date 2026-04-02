@@ -379,12 +379,27 @@ function createThemedChartOption(option, isDarkMode) {
   };
 }
 
+function isCandlestickOption(option) {
+  if (!isPlainObject(option)) return false;
+  const series = Array.isArray(option.series)
+    ? option.series
+    : isPlainObject(option.series)
+      ? [option.series]
+      : [];
+  return series.some((item) => {
+    if (!isPlainObject(item)) return false;
+    const type = String(item.type || "").toLowerCase();
+    return type === "candlestick" || type === "kline" || type === "k";
+  });
+}
+
 function AssistantChart({ option, isDarkMode }) {
   const chartRef = useRef(null);
   const themedOption = useMemo(
     () => createThemedChartOption(option, isDarkMode),
     [option, isDarkMode],
   );
+  const isCandlestick = useMemo(() => isCandlestickOption(themedOption), [themedOption]);
 
   useEffect(() => {
     if (!themedOption || typeof themedOption !== "object" || Array.isArray(themedOption)) {
@@ -426,7 +441,7 @@ function AssistantChart({ option, isDarkMode }) {
       ref={chartRef}
       sx={{
         width: "100%",
-        height: { xs: 240, sm: 300 },
+        height: isCandlestick ? { xs: 300, sm: 420 } : { xs: 240, sm: 300 },
         mt: 1,
         border: "1px solid",
         borderColor: isDarkMode ? "rgba(121, 168, 255, 0.3)" : "divider",
@@ -468,6 +483,18 @@ export default function LangflowWidget({ themeMode }) {
           typeof item.graphOption === "object" &&
           !Array.isArray(item.graphOption) &&
           Object.keys(item.graphOption).length > 0,
+      ),
+    [messages],
+  );
+  const hasAnyCandlestick = useMemo(
+    () =>
+      messages.some(
+        (item) =>
+          item?.graphOption &&
+          typeof item.graphOption === "object" &&
+          !Array.isArray(item.graphOption) &&
+          Object.keys(item.graphOption).length > 0 &&
+          isCandlestickOption(item.graphOption),
       ),
     [messages],
   );
@@ -711,7 +738,10 @@ export default function LangflowWidget({ themeMode }) {
         <Paper
           elevation={18}
           sx={{
-            width: { xs: "calc(100vw - 24px)", sm: hasAnyChart ? 640 : 420 },
+            width: {
+              xs: "calc(100vw - 24px)",
+              sm: hasAnyCandlestick ? 860 : hasAnyChart ? 680 : 420,
+            },
             height: { xs: "min(74vh, 640px)", sm: 620 },
             mt: 1.5,
             borderRadius: 3,

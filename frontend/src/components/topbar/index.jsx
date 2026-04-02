@@ -1,5 +1,4 @@
 import React from "react";
-import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
 import LightModeRoundedIcon from "@mui/icons-material/LightModeRounded";
 
 function BrandLockup() {
@@ -72,7 +71,12 @@ function ThemeToggle({ theme, onThemeToggle }) {
       {isDark ? (
         <LightModeRoundedIcon className="theme-icon" fontSize="small" />
       ) : (
-        <DarkModeRoundedIcon className="theme-icon" fontSize="small" />
+        <img
+          src="/darkmode-icon.png"
+          alt=""
+          className="theme-icon theme-icon-image"
+          aria-hidden="true"
+        />
       )}
     </button>
   );

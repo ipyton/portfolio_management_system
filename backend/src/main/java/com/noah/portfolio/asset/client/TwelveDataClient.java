@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -100,7 +101,7 @@ public class TwelveDataClient {
                                 .path(TIME_SERIES_PATH)
                                 .queryParam("symbol", symbol)
                                 .queryParam("interval", interval)
-                                .queryParam("outputsize", 120)
+                                .queryParam("outputsize", resolveOutputSize(interval, startDate, endDate))
                                 .queryParam("apikey", apiKey)
                                 .build())
                         .retrieve()
@@ -123,7 +124,8 @@ public class TwelveDataClient {
 
                 List<AssetCandleHistoryItem> items = new ArrayList<>();
                 for (JsonNode value : values) {
-                    LocalDate tradeDate = parseDate(text(value, "datetime"));
+                    String rawDateTime = text(value, "datetime");
+                    LocalDate tradeDate = parseDate(rawDateTime);
                     BigDecimal open = decimal(text(value, "open"));
                     BigDecimal high = decimal(text(value, "high"));
                     BigDecimal low = decimal(text(value, "low"));
@@ -134,7 +136,14 @@ public class TwelveDataClient {
                     if (tradeDate.isBefore(startDate) || tradeDate.isAfter(endDate)) {
                         continue;
                     }
-                    items.add(new AssetCandleHistoryItem(tradeDate, open, high, low, close));
+                    items.add(new AssetCandleHistoryItem(
+                            tradeDate,
+                            normalizeDateTime(rawDateTime),
+                            open,
+                            high,
+                            low,
+                            close
+                    ));
                 }
 
                 items.sort(Comparator.comparing(AssetCandleHistoryItem::tradeDate));
@@ -359,6 +368,29 @@ public class TwelveDataClient {
             return null;
         }
         return LocalDate.parse(rawDateTime.substring(0, 10));
+    }
+
+    private String normalizeDateTime(String rawDateTime) {
+        if (!StringUtils.hasText(rawDateTime)) {
+            return null;
+        }
+        return rawDateTime.trim().replace('T', ' ');
+    }
+
+    private int resolveOutputSize(String interval, LocalDate startDate, LocalDate endDate) {
+        if (startDate == null || endDate == null || endDate.isBefore(startDate)) {
+            return 120;
+        }
+        long daySpan = ChronoUnit.DAYS.between(startDate, endDate) + 1L;
+        long estimated;
+        switch (StringUtils.hasText(interval) ? interval.toLowerCase(Locale.ROOT) : "1day") {
+            case "1h" -> estimated = daySpan * 24L + 24L;
+            case "1week" -> estimated = daySpan / 7L + 10L;
+            case "1month" -> estimated = daySpan / 30L + 6L;
+            default -> estimated = daySpan + 16L;
+        }
+        long bounded = Math.max(30L, Math.min(5000L, estimated));
+        return (int) bounded;
     }
 
     private BigDecimal decimal(String raw) {

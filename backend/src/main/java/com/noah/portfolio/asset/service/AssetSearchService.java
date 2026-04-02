@@ -48,7 +48,7 @@ public class AssetSearchService {
     private static final int MIN_RECOMMENDATION_LOOKBACK_DAYS = 30;
     private static final int MAX_ASSET_CREATE_RETRIES = 8;
     private static final String DEFAULT_CANDLE_INTERVAL = "1day";
-    private static final Set<String> SUPPORTED_CANDLE_INTERVALS = Set.of("1day", "1week", "1month");
+    private static final Set<String> SUPPORTED_CANDLE_INTERVALS = Set.of("1h", "1day", "1week", "1month");
     private static final Set<String> KNOWN_INDEX_SYMBOLS = Set.of(
             "SPX", "IXIC", "DJI", "FTSE", "GDAXI", "FCHI", "N225", "HSI", "SSEC", "BSESN", "NSEI", "AXJO", "KS11", "TSX", "000300.SH"
     );
@@ -441,8 +441,9 @@ public class AssetSearchService {
     public AssetCandleHistoryResponse candleHistory(String query, Integer days, String interval) {
         String normalizedQuery = normalizeQuery(query);
         String normalizedLookupQuery = normalizeHistoryLookupQuery(normalizedQuery);
-        int historyDays = normalizeHistoryDays(days);
+        int historyDays = normalizeCandleHistoryDays(days);
         String normalizedInterval = normalizeCandleInterval(interval);
+        boolean intradayInterval = isIntradayCandleInterval(normalizedInterval);
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(historyDays - 1L);
 
@@ -457,12 +458,14 @@ public class AssetSearchService {
                 ? localAsset.getSymbol().toUpperCase(Locale.ROOT)
                 : normalizedLookupQuery.toUpperCase(Locale.ROOT);
 
-        List<AssetCandleHistoryItem> cachedItems = loadCachedCandles(
-                resolvedSymbol,
-                normalizedInterval,
-                startDate,
-                endDate
-        );
+        List<AssetCandleHistoryItem> cachedItems = intradayInterval
+                ? List.of()
+                : loadCachedCandles(
+                        resolvedSymbol,
+                        normalizedInterval,
+                        startDate,
+                        endDate
+                );
         if (!cachedItems.isEmpty() && !candleCacheNeedsRefresh(cachedItems, endDate, normalizedInterval)) {
             return new AssetCandleHistoryResponse(
                     normalizedQuery,
@@ -486,7 +489,9 @@ public class AssetSearchService {
             warnings.add("Twelve Data candle lookup failed: " + sanitizeWarningMessage(ex.getMessage()) + ".");
         }
         if (!twelveDataItems.isEmpty()) {
-            cacheCandleItems(resolvedSymbol, normalizedInterval, twelveDataItems, "TWELVE_DATA");
+            if (!intradayInterval) {
+                cacheCandleItems(resolvedSymbol, normalizedInterval, twelveDataItems, "TWELVE_DATA");
+            }
             return new AssetCandleHistoryResponse(
                     normalizedQuery,
                     resolvedSymbol,
@@ -599,6 +604,7 @@ public class AssetSearchService {
 
     private int candleStaleToleranceDays(String interval) {
         return switch (interval) {
+            case "1h" -> 1;
             case "1week" -> 10;
             case "1month" -> 40;
             default -> 3;
@@ -797,6 +803,19 @@ public class AssetSearchService {
         return days;
     }
 
+    private int normalizeCandleHistoryDays(Integer days) {
+        if (days == null) {
+            return DEFAULT_HISTORY_DAYS;
+        }
+        if (days < 1 || days > MAX_HISTORY_DAYS) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Days must be between 1 and " + MAX_HISTORY_DAYS + "."
+            );
+        }
+        return days;
+    }
+
     private String normalizeCandleInterval(String interval) {
         if (!StringUtils.hasText(interval)) {
             return DEFAULT_CANDLE_INTERVAL;
@@ -805,10 +824,14 @@ public class AssetSearchService {
         if (!SUPPORTED_CANDLE_INTERVALS.contains(normalized)) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Interval must be one of: 1day, 1week, 1month."
+                    "Interval must be one of: 1h, 1day, 1week, 1month."
             );
         }
         return normalized;
+    }
+
+    private boolean isIntradayCandleInterval(String interval) {
+        return "1h".equals(interval);
     }
 
     private AssetEntity resolveLocalAsset(String query) {
