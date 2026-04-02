@@ -263,7 +263,7 @@ function formatTradeFeedItem(trade) {
   const side = String(trade?.tradeType || trade?.side || "TRADE").toUpperCase();
   const quantity = toNumber(trade?.quantity ?? trade?.shares, 0);
   const price = toNumber(trade?.price, 0);
-  return `${symbol} ${side} ${quantity.toFixed(2)} @ ${price.toFixed(2)}`;
+  return `${symbol} ${side} ${quantity.toFixed(2)} · ${price.toFixed(2)}`;
 }
 
 function formatNewsTimestamp(item) {

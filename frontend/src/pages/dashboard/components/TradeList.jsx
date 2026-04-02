@@ -2,6 +2,39 @@ import React from "react";
 import LoadingInline from "../../../components/LoadingInline";
 import { formatCurrency } from "../../../lib/api";
 
+function splitTradeDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { date: "N/A", time: "" };
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return {
+      date: new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(parsed),
+      time: new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Shanghai",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(parsed),
+    };
+  }
+
+  if (raw.includes("T")) {
+    const [datePart, timePart] = raw.split("T");
+    return { date: datePart || "N/A", time: timePart || "" };
+  }
+
+  return { date: raw, time: "" };
+}
+
 export default function TradeList({
   trades,
   selectedSymbol,
@@ -38,14 +71,27 @@ export default function TradeList({
             </p>
           </>
         ) : (
-          visibleTrades.map((trade) => (
-            <div key={trade.id} className="activity-item" style={{ justifyContent: "space-between" }}>
-              <p>
-                <strong>{trade.symbol}</strong> · {trade.side} · {trade.shares} @ {formatCurrency(trade.price, "USD")}
-              </p>
-              <p>{trade.date}</p>
-            </div>
-          ))
+          visibleTrades.map((trade) => {
+            const { date, time } = splitTradeDateTime(trade.date);
+            return (
+              <div
+                key={trade.id}
+                className="activity-item"
+                style={{ justifyContent: "space-between", alignItems: "flex-start" }}
+              >
+                <div>
+                  <p>
+                    <strong>{trade.symbol}</strong> · {trade.side} · {trade.shares}
+                  </p>
+                  <p>{formatCurrency(trade.price, "USD")}</p>
+                </div>
+                <div>
+                  <p>{date}</p>
+                  {time ? <p>{time} CST</p> : null}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </article>
