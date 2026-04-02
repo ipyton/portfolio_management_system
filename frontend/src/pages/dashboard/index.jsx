@@ -6,7 +6,7 @@ import {
   formatPercent,
   formatSignedPercent,
 } from "../../lib/api";
-import HoldingsTable, { HOLDING_COLUMN_OPTIONS } from "./components/HoldingsTable";
+import HoldingsTable from "./components/HoldingsTable";
 import IntroCard from "./components/IntroCard";
 import MetricsSlider from "./components/MetricsSlider";
 import TradeList from "./components/TradeList";
@@ -122,10 +122,79 @@ const DONUT_COLORS = [
   "#fb7185",
 ];
 const MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA = 30;
+const REGION_DISPLAY_NAMES = {
+  US: "United States",
+  CN: "China",
+  HK: "Hong Kong",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  JP: "Japan",
+  IN: "India",
+  AU: "Australia",
+  KR: "South Korea",
+  CA: "Canada",
+  SG: "Singapore",
+  TW: "Taiwan",
+  BR: "Brazil",
+};
+const REGION_ALIASES = {
+  USA: "US",
+  UNITEDSTATES: "US",
+  UNITEDSTATESOFAMERICA: "US",
+  CHINA: "CN",
+  MAINLANDCHINA: "CN",
+  PEOPLESREPUBLICOFCHINA: "CN",
+  HONGKONG: "HK",
+  UNITEDKINGDOM: "UK",
+  GREATBRITAIN: "UK",
+  GB: "UK",
+  ASIASHANGHAI: "CN",
+  AMERICANEWYORK: "US",
+  EUROPELONDON: "UK",
+};
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeRegionCode(raw) {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const upper = trimmed.toUpperCase();
+  if (["UNKNOWN", "N/A", "NA", "NONE", "NULL"].includes(upper)) {
+    return "UNKNOWN";
+  }
+  const collapsed = upper.replace(/[^A-Z0-9]/g, "");
+  if (!collapsed) {
+    return "UNKNOWN";
+  }
+  if (REGION_ALIASES[collapsed]) {
+    return REGION_ALIASES[collapsed];
+  }
+  if (collapsed.length === 2) {
+    return collapsed;
+  }
+  return upper;
+}
+
+function isUnknownRegion(raw) {
+  const code = normalizeRegionCode(raw);
+  return !code || code === "UNKNOWN";
+}
+
+function formatRegionDisplay(raw) {
+  const code = normalizeRegionCode(raw);
+  if (!code || code === "UNKNOWN") {
+    return "Unknown";
+  }
+  return REGION_DISPLAY_NAMES[code] || code;
 }
 
 function normalizeHoldingRow(row) {
@@ -362,7 +431,9 @@ function buildLiveCategories(payload) {
     ? holdings.regionDistribution
     : [];
   const topAssetClass = assetClassDistribution[0] || null;
-  const topRegion = regionDistribution[0] || null;
+  const topRegion = regionDistribution.find((item) => !isUnknownRegion(item?.name))
+    || regionDistribution[0]
+    || null;
   const concentrationRisk = holdings.concentrationRisk || {};
 
   const tradeRecords = Array.isArray(trading.buySellRecords) ? trading.buySellRecords : [];
@@ -523,7 +594,7 @@ function buildLiveCategories(payload) {
           key: "regionDistribution",
           label: "Region",
           value: topRegion
-            ? `${topRegion.name} ${formatPercent(topRegion.weight, 1)}`
+            ? `${formatRegionDisplay(topRegion.name)} ${formatPercent(topRegion.weight, 1)}`
             : "N/A",
           detail: "Largest region exposure",
         },
@@ -589,7 +660,6 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
   const [dashboardPayload, setDashboardPayload] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(true);
   const [liveDataUnavailable, setLiveDataUnavailable] = useState(false);
-  const [selectedColumn, setSelectedColumn] = useState(HOLDING_COLUMN_OPTIONS[0].key);
 
   const categories = useMemo(
     () => buildLiveCategories(dashboardPayload),
@@ -698,12 +768,14 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
       return {
         heading: "Syncing backend",
         message: "Loading live dashboard metrics from API.",
+        loading: true,
       };
     }
     if (liveDataUnavailable) {
       return {
         heading: "Sync failed",
         message: "Backend data is unavailable right now.",
+        loading: false,
       };
     }
     return null;
@@ -773,10 +845,17 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         : marketValue - holding.shares * holding.costBasis;
       return { ...holding, marketValue, pnl };
     });
-    const totalMarketValue = withMetrics.reduce((sum, holding) => sum + holding.marketValue, 0);
+    const totalMarketValue = withMetrics.reduce((sum, holding) => (
+      Number.isFinite(Number(holding.marketValue)) && Number(holding.marketValue) > 0
+        ? sum + Number(holding.marketValue)
+        : sum
+    ), 0);
     return withMetrics.map((holding) => ({
       ...holding,
-      allocation: totalMarketValue > 0 ? (holding.marketValue / totalMarketValue) * 100 : 0,
+      allocation:
+        totalMarketValue > 0 && Number.isFinite(Number(holding.marketValue))
+          ? (Number(holding.marketValue) / totalMarketValue) * 100
+          : null,
     }));
   }, [liveHoldings]);
 
@@ -821,8 +900,6 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
             holdings={enrichedHoldings}
             selectedSymbol={selectedSymbol}
             onSelectSymbol={setSelectedSymbol}
-            selectedColumn={selectedColumn}
-            onColumnChange={setSelectedColumn}
             isLoading={isLiveLoading}
             dataUnavailable={liveDataUnavailable}
             minRows={5}

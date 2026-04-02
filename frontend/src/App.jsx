@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import LoadingInline from "./components/LoadingInline";
 import LangflowWidget from "./components/langflow";
 import Topbar from "./components/topbar";
 import {
@@ -144,7 +145,9 @@ export default function App() {
                   className="auth-submit"
                   disabled={isAuthenticating}
                 >
-                  {isAuthenticating ? "Verifying..." : "Unlock"}
+                  {isAuthenticating
+                    ? <LoadingInline label="Verifying..." size="xs" tone="inverted" />
+                    : "Unlock"}
                 </button>
                 {authError ? (
                   <p className="auth-error">{authError}</p>

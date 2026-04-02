@@ -25,6 +25,7 @@ public class PortfolioSimulationService {
     private static final double EPSILON = 1e-10;
     private static final int DEFAULT_SAMPLE_PATHS = 8;
     private static final int STUDENT_T_DEGREES_OF_FREEDOM = 6;
+    private static final double TRADING_DAYS_PER_YEAR = 252.0;
 
     public WienerSimulationResponse simulatePortfolio(WienerSimulationRequest request) {
         int n = request.assetCount();
@@ -43,8 +44,9 @@ public class PortfolioSimulationService {
         validateCorrelationMatrix(corr);
 
         double[][] cholesky = choleskyWithJitter(corr);
-        double dt = 1.0 / steps;
+        double dt = 1.0 / TRADING_DAYS_PER_YEAR;
         double sqrtDt = Math.sqrt(dt);
+        double horizonYears = steps / TRADING_DAYS_PER_YEAR;
 
         List<String> symbols = normalizeSymbols(request.symbols(), n);
         List<double[]> simulatedPaths = new ArrayList<>(paths);
@@ -80,16 +82,16 @@ public class PortfolioSimulationService {
             simulatedPaths.add(portfolioSeries);
         }
 
-        List<PortfolioPoint> meanPath = buildMeanPath(simulatedPaths, steps, paths);
-        List<PortfolioPath> samplePaths = buildSamplePaths(simulatedPaths, steps);
-        SimulationStats stats = buildStats(simulatedPaths, initialPortfolioValue, steps);
+        List<PortfolioPoint> meanPath = buildMeanPath(simulatedPaths, steps, paths, dt);
+        List<PortfolioPath> samplePaths = buildSamplePaths(simulatedPaths, steps, dt);
+        SimulationStats stats = buildStats(simulatedPaths, initialPortfolioValue, steps, horizonYears);
 
         List<String> warnings = new ArrayList<>();
         if (!approximatelyOne(rawWeightSum, 1e-8)) {
             warnings.add("Input weights were normalized to sum to 1.");
         }
         warnings.add("GBM simulation uses standardized Student-t shocks (df=" + STUDENT_T_DEGREES_OF_FREEDOM
-                + ") with constant annual drift/volatility and static correlation.");
+                + "), daily dt=1/252, constant annual drift/volatility, and static correlation.");
 
         return new WienerSimulationResponse(
                 n,
@@ -231,33 +233,33 @@ public class PortfolioSimulationService {
         return lower;
     }
 
-    private List<PortfolioPoint> buildMeanPath(List<double[]> paths, int steps, int pathCount) {
+    private List<PortfolioPoint> buildMeanPath(List<double[]> paths, int steps, int pathCount, double dt) {
         List<PortfolioPoint> mean = new ArrayList<>(steps + 1);
         for (int step = 0; step <= steps; step++) {
             double sum = 0.0;
             for (double[] path : paths) {
                 sum += path[step];
             }
-            mean.add(new PortfolioPoint(step, round((double) step / steps), round(sum / pathCount)));
+            mean.add(new PortfolioPoint(step, round(step * dt), round(sum / pathCount)));
         }
         return mean;
     }
 
-    private List<PortfolioPath> buildSamplePaths(List<double[]> paths, int steps) {
+    private List<PortfolioPath> buildSamplePaths(List<double[]> paths, int steps, double dt) {
         int sampleCount = Math.min(DEFAULT_SAMPLE_PATHS, paths.size());
         List<PortfolioPath> samples = new ArrayList<>(sampleCount);
         for (int idx = 0; idx < sampleCount; idx++) {
             double[] raw = paths.get(idx);
             List<PortfolioPoint> points = new ArrayList<>(steps + 1);
             for (int step = 0; step <= steps; step++) {
-                points.add(new PortfolioPoint(step, round((double) step / steps), round(raw[step])));
+                points.add(new PortfolioPoint(step, round(step * dt), round(raw[step])));
             }
             samples.add(new PortfolioPath(idx + 1, points));
         }
         return samples;
     }
 
-    private SimulationStats buildStats(List<double[]> paths, double initialPortfolioValue, int steps) {
+    private SimulationStats buildStats(List<double[]> paths, double initialPortfolioValue, int steps, double horizonYears) {
         List<Double> returns = paths.stream()
                 .map(path -> path[steps] / initialPortfolioValue - 1.0)
                 .sorted(Comparator.naturalOrder())
@@ -265,13 +267,14 @@ public class PortfolioSimulationService {
 
         double expected = mean(returns);
         double std = standardDeviation(returns, expected);
+        double annualizedStd = horizonYears > EPSILON ? std / Math.sqrt(horizonYears) : 0.0;
         double q95 = quantile(returns, 0.05);
         double q99 = quantile(returns, 0.01);
         double cvar95 = conditionalTailMean(returns, q95);
 
         return new SimulationStats(
                 round(expected),
-                round(std),
+                round(annualizedStd),
                 round(Math.max(0.0, -q95)),
                 round(Math.max(0.0, -q99)),
                 round(Math.max(0.0, -cvar95))

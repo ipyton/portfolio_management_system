@@ -113,6 +113,9 @@
 5. 运行方式：
 - 在 Chatbot/chatbot_service 下安装依赖：pip install -r requirements.txt
 - 在项目根目录 Chatbot/.env 中配置数据库和 API Key
+  - TwelveData 支持多 key：`TWELVEDATA_API_KEYS=key_a,key_b,key_c`（推荐）
+  - 兼容单 key：`TWELVEDATA_API_KEY=key_a`
+  - 也支持分号/空白分隔；或使用 `TWELVEDATA_API_KEY_1`、`TWELVEDATA_API_KEY_2` 形式
 - 启动：uvicorn chatbot_service.main:app --reload --host 0.0.0.0 --port 8000
 
 6. 接口：

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -10,6 +11,47 @@ PROJECT_DIR = SERVICE_DIR.parent
 for env_file in (PROJECT_DIR / ".env", SERVICE_DIR / ".env"):
     if env_file.exists():
         load_dotenv(env_file, override=True)
+
+
+def _split_env_values(raw: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[,\s;]+", raw or "") if part.strip()]
+
+
+def _load_twelvedata_api_keys() -> tuple[str, ...]:
+    keys: list[str] = []
+    keys.extend(_split_env_values(os.getenv("TWELVEDATA_API_KEYS", "")))
+
+    indexed_keys = []
+    prefix = "TWELVEDATA_API_KEY_"
+    for env_name, env_value in os.environ.items():
+        if not env_name.startswith(prefix):
+            continue
+        value = env_value.strip()
+        if not value:
+            continue
+        suffix = env_name[len(prefix) :]
+        order = int(suffix) if suffix.isdigit() else 10**9
+        indexed_keys.append((order, env_name, value))
+
+    indexed_keys.sort(key=lambda item: (item[0], item[1]))
+    keys.extend(item[2] for item in indexed_keys)
+
+    single_key = os.getenv("TWELVEDATA_API_KEY", "").strip()
+    if single_key:
+        keys.append(single_key)
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for key in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return tuple(deduped)
+
+
+_TWELVEDATA_API_KEYS = _load_twelvedata_api_keys()
+
 
 @dataclass
 class Settings:
@@ -32,7 +74,8 @@ class Settings:
     https_proxy: str = os.getenv("HTTPS_PROXY", "")
 
     serpapi_key: str = os.getenv("SERPAPI_KEY", "")
-    twelvedata_api_key: str = os.getenv("TWELVEDATA_API_KEY", "")
+    twelvedata_api_key: str = _TWELVEDATA_API_KEYS[0] if _TWELVEDATA_API_KEYS else ""
+    twelvedata_api_keys: tuple[str, ...] = _TWELVEDATA_API_KEYS
 
     chat_history_table: str = os.getenv("CHAT_HISTORY_TABLE", "")
 

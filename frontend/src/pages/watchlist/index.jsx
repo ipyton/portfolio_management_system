@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import LoadingInline from "../../components/LoadingInline";
 import {
   buildFxRateMap,
   convertAmountByFx,
@@ -30,8 +31,11 @@ export const watchlistActivityFeed = [
 ];
 
 const HISTORY_LOOKBACK_DAYS = 180;
+const CANDLE_LOOKBACK_DAYS = HISTORY_LOOKBACK_DAYS;
+const DEFAULT_CANDLE_INTERVAL = "1day";
 const FAV_STORAGE_KEY = `watchlist-favourites-${DEFAULT_USER_ID}`;
 const USD_CURRENCY = "USD";
+const buildHistoryCacheKey = (symbolKey, interval) => `${symbolKey}|${interval}`;
 
 const toFiniteNumber = (value, fallback = 0) => {
   const normalized = Number(value);
@@ -209,6 +213,7 @@ function mapWatchlistItemToRow(item, existingRow, holdingItem, isFavourite, fxRa
     addedAt: item?.addedAt || null,
     note: item?.note || "",
     priceHistory: existingRow?.priceHistory || [],
+    candleHistory: existingRow?.candleHistory || [],
   };
 }
 
@@ -223,6 +228,8 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [suggestionRows, setSuggestionRows] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [searchingSuggestions, setSearchingSuggestions] = useState(false);
+  const [candleInterval, setCandleInterval] = useState(DEFAULT_CANDLE_INTERVAL);
   const [loading, setLoading] = useState(false);
   const [loadingHistoryFor, setLoadingHistoryFor] = useState("");
   const [savingSymbol, setSavingSymbol] = useState("");
@@ -237,8 +244,9 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const [cashByCurrency, setCashByCurrency] = useState({});
   const [fxRateMap, setFxRateMap] = useState({ USD: 1 });
   const rowsRef = useRef(rows);
-  const loadedHistorySymbolsRef = useRef(new Set());
+  const historyCacheRef = useRef(new Map());
   const loadingHistorySymbolsRef = useRef(new Set());
+  const candleIntervalRef = useRef(candleInterval);
 
   const requireLogin = useCallback(
     (actionLabel) => {
@@ -266,13 +274,9 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   );
 
   const cashBalance = useMemo(() => {
-    const selectedCurrency = (selected?.currency || "").toUpperCase();
-    if (selectedCurrency && Number.isFinite(cashByCurrency[selectedCurrency])) {
-      return cashByCurrency[selectedCurrency];
-    }
-    const firstBalance = Object.values(cashByCurrency)[0];
-    return Number.isFinite(firstBalance) ? firstBalance : 0;
-  }, [cashByCurrency, selected?.currency]);
+    const usdBalance = cashByCurrency[USD_CURRENCY];
+    return Number.isFinite(usdBalance) ? usdBalance : 0;
+  }, [cashByCurrency]);
 
   const numericShareAmount = Number.parseFloat(tradeAmount || "0");
   const numericCashAmount = Number.parseFloat(tradeCashAmount || "0");
@@ -286,11 +290,12 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const requiredCash = tradeAmount
     ? numericShareAmount * latestPrice
     : numericCashAmount;
+  const requiredCashUsd = toUsdAmount(requiredCash, selected?.currency);
 
   const isOverBalance =
     tradeModal.type === "buy"
-    && Number.isFinite(requiredCash)
-    && requiredCash > cashBalance;
+    && Number.isFinite(requiredCashUsd)
+    && requiredCashUsd > cashBalance;
 
   const holdingLimit = Number(selected?.holdingShares || 0);
   const isOverHolding =
@@ -302,13 +307,17 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     ? selected.holdingShares * latestPrice
     : 0;
   const calculatedCash = tradeAmount ? Number(tradeAmount) * latestPrice : 0;
-  const cashBalanceDisplay = formatUsdValue(cashBalance, selected?.currency);
+  const cashBalanceDisplay = formatCurrency(cashBalance, USD_CURRENCY);
   const stockCashValueDisplay = formatUsdValue(stockCashValue, selected?.currency);
   const calculatedCashDisplay = formatUsdValue(calculatedCash, selected?.currency);
 
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  useEffect(() => {
+    candleIntervalRef.current = candleInterval;
+  }, [candleInterval]);
 
   useEffect(() => {
     if (!isLoggedIn && tradeModal.open) {
@@ -387,8 +396,47 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     loadWatchlist();
   }, [loadWatchlist]);
 
-  const applyHistoryToSymbol = useCallback((symbol, history) => {
+  useEffect(() => {
+    setLoadingHistoryFor("");
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        const symbolKey = String(row.symbol || "").toUpperCase();
+        const cached = historyCacheRef.current.get(buildHistoryCacheKey(symbolKey, candleInterval));
+        const cachedHistory = cached?.history || [];
+        const cachedCandles = cached?.candles || [];
+        const insights = cachedHistory.length
+          ? computeHistoryInsights(cachedHistory, row.currency, fxRateMap)
+          : null;
+        return {
+          ...row,
+          priceHistory: cachedHistory,
+          candleHistory: cachedCandles,
+          ...(insights || {}),
+        };
+      }),
+    );
+    setSelected((current) => (current
+      ? (() => {
+          const symbolKey = String(current.symbol || "").toUpperCase();
+          const cached = historyCacheRef.current.get(buildHistoryCacheKey(symbolKey, candleInterval));
+          const cachedHistory = cached?.history || [];
+          const cachedCandles = cached?.candles || [];
+          const insights = cachedHistory.length
+            ? computeHistoryInsights(cachedHistory, current.currency, fxRateMap)
+            : null;
+          return {
+            ...current,
+            priceHistory: cachedHistory,
+            candleHistory: cachedCandles,
+            ...(insights || {}),
+          };
+        })()
+      : current));
+  }, [candleInterval, fxRateMap]);
+
+  const applyHistoryToSymbol = useCallback((symbol, history, candles) => {
     const symbolKey = String(symbol || "").toUpperCase();
+    const candleHistory = Array.isArray(candles) ? candles : [];
     setRows((currentRows) =>
       currentRows.map((row) => {
         if (String(row.symbol || "").toUpperCase() !== symbolKey) {
@@ -398,6 +446,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         return {
           ...row,
           priceHistory: history,
+          candleHistory,
           ...(insights || {}),
         };
       }),
@@ -410,6 +459,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       return {
         ...current,
         priceHistory: history,
+        candleHistory,
         ...(insights || {}),
       };
     });
@@ -417,33 +467,61 @@ export default function WatchlistPage({ isLoggedIn = true }) {
 
   const hydrateHistoryForSymbol = useCallback(async (symbol, reportError = false) => {
     const symbolKey = String(symbol || "").toUpperCase();
+    const requestedInterval = candleInterval;
+    const historyCacheKey = buildHistoryCacheKey(symbolKey, requestedInterval);
+    const loadingLabel = `${symbolKey} (${requestedInterval})`;
     if (!symbolKey) {
       return;
     }
-    if (loadedHistorySymbolsRef.current.has(symbolKey)) {
+    const cached = historyCacheRef.current.get(historyCacheKey);
+    if (cached) {
+      if (candleIntervalRef.current === requestedInterval) {
+        applyHistoryToSymbol(symbolKey, cached.history, cached.candles);
+      }
       return;
     }
-    if (loadingHistorySymbolsRef.current.has(symbolKey)) {
+    if (loadingHistorySymbolsRef.current.has(historyCacheKey)) {
       return;
     }
 
-    loadingHistorySymbolsRef.current.add(symbolKey);
+    loadingHistorySymbolsRef.current.add(historyCacheKey);
     if (String(selected?.symbol || "").toUpperCase() === symbolKey) {
-      setLoadingHistoryFor(symbolKey);
+      setLoadingHistoryFor(loadingLabel);
     }
 
     try {
       const response = await apiFetch(
-        `/api/assets/price-history?query=${encodeURIComponent(symbolKey)}&days=${HISTORY_LOOKBACK_DAYS}`,
+        `/api/assets/candles?query=${encodeURIComponent(symbolKey)}&days=${CANDLE_LOOKBACK_DAYS}&interval=${encodeURIComponent(requestedInterval)}`,
       );
-      const history = (response?.items || [])
+      const candles = (response?.items || [])
         .map((item) => ({
           date: item.tradeDate,
-          price: toFiniteNumber(item.close, NaN),
+          open: toFiniteNumber(item.open, NaN),
+          high: toFiniteNumber(item.high, NaN),
+          low: toFiniteNumber(item.low, NaN),
+          close: toFiniteNumber(item.close, NaN),
+        }))
+        .filter((point) => Number.isFinite(point.close));
+      const history = candles
+        .map((point) => ({
+          date: point.date,
+          price: point.close,
         }))
         .filter((point) => Number.isFinite(point.price));
-      applyHistoryToSymbol(symbolKey, history);
-      loadedHistorySymbolsRef.current.add(symbolKey);
+      const validCandles = candles.filter(
+        (point) =>
+          Number.isFinite(point.open)
+          && Number.isFinite(point.high)
+          && Number.isFinite(point.low)
+          && Number.isFinite(point.close),
+      );
+      historyCacheRef.current.set(historyCacheKey, {
+        history,
+        candles: validCandles,
+      });
+      if (candleIntervalRef.current === requestedInterval) {
+        applyHistoryToSymbol(symbolKey, history, validCandles);
+      }
     } catch (requestError) {
       if (reportError) {
         setError(
@@ -451,10 +529,10 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         );
       }
     } finally {
-      loadingHistorySymbolsRef.current.delete(symbolKey);
-      setLoadingHistoryFor((current) => (current === symbolKey ? "" : current));
+      loadingHistorySymbolsRef.current.delete(historyCacheKey);
+      setLoadingHistoryFor((current) => (current === loadingLabel ? "" : current));
     }
-  }, [applyHistoryToSymbol, selected?.symbol]);
+  }, [applyHistoryToSymbol, selected?.symbol, candleInterval]);
 
   useEffect(() => {
     rows.forEach((row) => {
@@ -478,11 +556,13 @@ export default function WatchlistPage({ isLoggedIn = true }) {
     if (!keyword) {
       setSuggestionRows([]);
       setSearchError("");
+      setSearchingSuggestions(false);
       return;
     }
 
     let disposed = false;
     const timer = setTimeout(async () => {
+      setSearchingSuggestions(true);
       try {
         setSearchError("");
         const response = await apiFetch(
@@ -504,6 +584,10 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         if (!disposed) {
           setSuggestionRows([]);
           setSearchError(requestError.message || "Failed to search symbols.");
+        }
+      } finally {
+        if (!disposed) {
+          setSearchingSuggestions(false);
         }
       }
     }, 250);
@@ -736,6 +820,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         <h1 className="watchlist-title">Watch List</h1>
         <WatchlistSearch
           searchTerm={searchTerm}
+          isSearching={searchingSuggestions}
           onSearchChange={(value) => {
             setSearchTerm(value);
             setShowSuggestions(true);
@@ -762,15 +847,27 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           Guest mode: view and search only. Add, remove, favourite, and trade actions are disabled.
         </p>
       )}
-      {loading && <p className="watchlist-note">Loading watchlist...</p>}
+      {loading && (
+        <p className="watchlist-note">
+          <LoadingInline label="Loading watchlist..." size="xs" tone="muted" />
+        </p>
+      )}
       {loadingHistoryFor && (
         <p className="watchlist-note">
-          Loading {loadingHistoryFor} price history...
+          <LoadingInline
+            label={`Loading ${loadingHistoryFor} candle history...`}
+            size="xs"
+            tone="muted"
+          />
         </p>
       )}
       {(savingSymbol || tradeSubmitting) && (
         <p className="watchlist-note">
-          {tradeSubmitting ? "Submitting trade..." : `Syncing ${savingSymbol}...`}
+          <LoadingInline
+            label={tradeSubmitting ? "Submitting trade..." : `Syncing ${savingSymbol}...`}
+            size="xs"
+            tone="muted"
+          />
         </p>
       )}
       {notice && <p className="watchlist-note">{notice}</p>}
@@ -799,9 +896,11 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         />
         <WatchlistDetail
           selected={selected}
+          candleInterval={candleInterval}
           isRemoving={savingSymbol === selected?.symbol}
           interactionDisabled={!isLoggedIn}
           toUsdAmount={toUsdAmount}
+          onCandleIntervalChange={setCandleInterval}
           onRemove={removeSelectedFromWatchlist}
           onToggleFavourite={(symbol) => {
             if (!requireLogin("toggle favourites")) {

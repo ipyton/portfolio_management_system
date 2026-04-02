@@ -32,12 +32,14 @@ import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.client.TwelveDataClient;
 import com.noah.portfolio.asset.client.YahooFinanceClient;
 import com.noah.portfolio.asset.dto.AssetPriceHistoryItem;
+import com.noah.portfolio.asset.dto.YahooFinanceSearchResult;
 import com.noah.portfolio.asset.entity.AssetEntity;
 import com.noah.portfolio.asset.entity.AssetStockDetailEntity;
 import com.noah.portfolio.asset.model.AssetPriceWindowSnapshot;
 import com.noah.portfolio.asset.repository.AssetRepository;
 import com.noah.portfolio.asset.repository.AssetSearchDataRepository;
 import com.noah.portfolio.asset.model.AssetType;
+import com.noah.portfolio.common.RegionCodeNormalizer;
 import com.noah.portfolio.user.entity.UserEntity;
 import com.noah.portfolio.user.repository.UserRepository;
 
@@ -138,7 +140,13 @@ public class WatchlistService {
 
     private AssetEntity resolveStockAsset(WatchlistRequest request) {
         if (request.assetId() != null) {
-            return requireStockAsset(request.assetId());
+            AssetEntity existing = requireStockAsset(request.assetId());
+            return backfillAssetVenueIfMissing(
+                    existing,
+                    existing.getSymbol(),
+                    normalizeExchange(request.exchange(), existing.getSymbol()),
+                    normalizeRegion(request.region(), existing.getSymbol(), request.exchange())
+            );
         }
 
         if (!StringUtils.hasText(request.symbol())) {
@@ -146,11 +154,13 @@ public class WatchlistService {
         }
 
         String symbol = request.symbol().trim().toUpperCase(Locale.ROOT);
+        String normalizedExchange = normalizeExchange(request.exchange(), symbol);
+        String normalizedRegion = normalizeRegion(request.region(), symbol, normalizedExchange);
         AssetEntity existing = assetRepository
                 .findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(symbol, AssetType.STOCK)
                 .orElse(null);
         if (existing != null) {
-            return existing;
+            return backfillAssetVenueIfMissing(existing, symbol, normalizedExchange, normalizedRegion);
         }
 
         String name = limitLength(StringUtils.hasText(request.name()) ? request.name().trim() : symbol, 100);
@@ -158,8 +168,8 @@ public class WatchlistService {
                 StringUtils.hasText(request.currency()) ? request.currency().trim().toUpperCase(Locale.ROOT) : "USD",
                 10
         );
-        String exchange = limitLength(StringUtils.hasText(request.exchange()) ? request.exchange().trim() : "UNKNOWN", 20);
-        String region = limitLength(StringUtils.hasText(request.region()) ? request.region().trim() : "UNKNOWN", 50);
+        String exchange = limitLength(firstNonBlank(normalizedExchange, inferExchange(symbol), "UNKNOWN"), 20);
+        String region = limitLength(normalizeRegion(normalizedRegion, symbol, exchange), 50);
 
         for (int attempt = 1; attempt <= MAX_ASSET_CREATE_RETRIES; attempt += 1) {
             Long maxId = assetRepository.findMaxId();
@@ -181,7 +191,7 @@ public class WatchlistService {
                         .findFirstBySymbolIgnoreCaseAndAssetTypeOrderByIdAsc(symbol, AssetType.STOCK)
                         .orElse(null);
                 if (existingAsset != null) {
-                    return existingAsset;
+                    return backfillAssetVenueIfMissing(existingAsset, symbol, normalizedExchange, normalizedRegion);
                 }
                 if (attempt == MAX_ASSET_CREATE_RETRIES) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "Failed to create stock asset.", ex);
@@ -206,6 +216,222 @@ public class WatchlistService {
         }
         String trimmed = value.trim();
         return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
+    private AssetEntity backfillAssetVenueIfMissing(
+            AssetEntity asset,
+            String symbol,
+            String requestedExchange,
+            String requestedRegion
+    ) {
+        if (asset == null) {
+            return null;
+        }
+
+        String fallbackExchange = firstNonBlank(requestedExchange, inferExchange(symbol));
+        String fallbackRegion = normalizeRegion(requestedRegion, symbol, fallbackExchange);
+        if (!StringUtils.hasText(fallbackExchange)) {
+            VenueHint remoteHint = fetchRemoteVenueHint(symbol);
+            fallbackExchange = firstNonBlank(normalizeExchange(remoteHint.exchange(), symbol), inferExchange(symbol));
+            fallbackRegion = normalizeRegion(firstNonBlank(requestedRegion, remoteHint.region()), symbol, fallbackExchange);
+        }
+
+        boolean missingExchange = isUnknownVenueValue(asset.getExchange());
+        boolean missingRegion = isUnknownVenueValue(asset.getRegion());
+        if (!missingExchange && !missingRegion) {
+            return asset;
+        }
+
+        String nextExchange = missingExchange
+                ? limitLength(firstNonBlank(fallbackExchange, "UNKNOWN"), 20)
+                : limitLength(asset.getExchange(), 20);
+        String nextRegion = missingRegion
+                ? limitLength(firstNonBlank(fallbackRegion, "UNKNOWN"), 50)
+                : limitLength(asset.getRegion(), 50);
+        if (nextExchange == null) {
+            nextExchange = "UNKNOWN";
+        }
+        if (nextRegion == null) {
+            nextRegion = "UNKNOWN";
+        }
+
+        assetRepository.updateVenueMetadata(asset.getId(), nextExchange, nextRegion);
+        return assetRepository.findById(asset.getId()).orElse(asset);
+    }
+
+    private String normalizeExchange(String rawExchange, String symbol) {
+        if (StringUtils.hasText(rawExchange) && !isUnknownVenueValue(rawExchange)) {
+            String normalized = rawExchange.trim().toUpperCase(Locale.ROOT);
+            if (normalized.contains("NASDAQ")) {
+                return "NASDAQ";
+            }
+            if (normalized.contains("NYSE") || normalized.contains("NEW YORK")) {
+                return "NYSE";
+            }
+            if (normalized.contains("AMEX") || normalized.contains("AMERICAN")) {
+                return "AMEX";
+            }
+            if (normalized.contains("HKEX") || normalized.contains("HONG KONG")) {
+                return "HKEX";
+            }
+            if (normalized.contains("SHANGHAI") || "SSE".equals(normalized)) {
+                return "SSE";
+            }
+            if (normalized.contains("SHENZHEN") || "SZSE".equals(normalized)) {
+                return "SZSE";
+            }
+            if (normalized.contains("TOKYO") || "TSE".equals(normalized)) {
+                return "TSE";
+            }
+            if (normalized.contains("LONDON") || "LSE".equals(normalized)) {
+                return "LSE";
+            }
+            if (normalized.contains("TORONTO") || "TSX".equals(normalized)) {
+                return "TSX";
+            }
+            if (normalized.contains("AUSTRALIAN") || "ASX".equals(normalized)) {
+                return "ASX";
+            }
+            return normalized;
+        }
+        return inferExchange(symbol);
+    }
+
+    private String normalizeRegion(String rawRegion, String symbol, String exchange) {
+        String normalized = RegionCodeNormalizer.normalize(rawRegion);
+        if (normalized != null) {
+            return normalized;
+        }
+        String fromExchange = RegionCodeNormalizer.normalize(exchange);
+        if (fromExchange != null) {
+            return fromExchange;
+        }
+        return firstNonBlank(inferRegion(symbol), "UNKNOWN");
+    }
+
+    private boolean isUnknownVenueValue(String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return "UNKNOWN".equals(normalized)
+                || "N/A".equals(normalized)
+                || "NA".equals(normalized)
+                || "NONE".equals(normalized)
+                || "NULL".equals(normalized);
+    }
+
+    private String inferExchange(String symbol) {
+        if (!StringUtils.hasText(symbol)) {
+            return null;
+        }
+        String upper = symbol.trim().toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || upper.endsWith(".SS")) {
+            return "SSE";
+        }
+        if (upper.endsWith(".SZ")) {
+            return "SZSE";
+        }
+        if (upper.endsWith(".HK")) {
+            return "HKEX";
+        }
+        if (upper.endsWith(".T")) {
+            return "TSE";
+        }
+        if (upper.endsWith(".L")) {
+            return "LSE";
+        }
+        if (upper.endsWith(".AX")) {
+            return "ASX";
+        }
+        if (upper.endsWith(".TO")) {
+            return "TSX";
+        }
+        if (upper.endsWith(".KS") || upper.endsWith(".KQ")) {
+            return "KRX";
+        }
+        return null;
+    }
+
+    private String inferRegion(String symbol) {
+        if (!StringUtils.hasText(symbol)) {
+            return "UNKNOWN";
+        }
+        String upper = symbol.trim().toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || upper.endsWith(".SS") || upper.endsWith(".SZ")) {
+            return "CN";
+        }
+        if (upper.endsWith(".HK")) {
+            return "HK";
+        }
+        if (upper.endsWith(".T")) {
+            return "JP";
+        }
+        if (upper.endsWith(".L")) {
+            return "UK";
+        }
+        if (upper.endsWith(".AX")) {
+            return "AU";
+        }
+        if (upper.endsWith(".TO")) {
+            return "CA";
+        }
+        if (upper.endsWith(".KS") || upper.endsWith(".KQ")) {
+            return "KR";
+        }
+        if (upper.endsWith(".NS") || upper.endsWith(".BO")) {
+            return "IN";
+        }
+        if (upper.endsWith(".TW")) {
+            return "TW";
+        }
+        if (upper.endsWith(".SI")) {
+            return "SG";
+        }
+        return "US";
+    }
+
+    private VenueHint fetchRemoteVenueHint(String symbol) {
+        if (!StringUtils.hasText(symbol)) {
+            return VenueHint.EMPTY;
+        }
+        String normalizedSymbol = symbol.trim().toUpperCase(Locale.ROOT);
+
+        try {
+            YahooFinanceSearchResult finnhubMatch = finnhubClient.searchBestMatch(normalizedSymbol).orElse(null);
+            if (matchesSymbol(normalizedSymbol, finnhubMatch)) {
+                return new VenueHint(finnhubMatch.exchange(), finnhubMatch.region());
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Watchlist venue enrichment failed via Finnhub for symbol {}: {}", normalizedSymbol, ex.getMessage());
+        }
+
+        try {
+            YahooFinanceSearchResult yahooMatch = yahooFinanceClient.searchBestMatch(normalizedSymbol).orElse(null);
+            if (matchesSymbol(normalizedSymbol, yahooMatch)) {
+                return new VenueHint(yahooMatch.exchange(), yahooMatch.region());
+            }
+        } catch (RuntimeException ex) {
+            log.debug("Watchlist venue enrichment failed via Yahoo for symbol {}: {}", normalizedSymbol, ex.getMessage());
+        }
+
+        return VenueHint.EMPTY;
+    }
+
+    private boolean matchesSymbol(String expectedSymbol, YahooFinanceSearchResult candidate) {
+        if (candidate == null || !StringUtils.hasText(candidate.symbol())) {
+            return false;
+        }
+        return expectedSymbol.equalsIgnoreCase(candidate.symbol().trim());
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private AssetPriceWindowSnapshot resolvePriceWindow(
@@ -308,6 +534,21 @@ public class WatchlistService {
     private WatchlistItem toItem(WatchlistEntity watchlist, AssetPriceWindowSnapshot priceWindow) {
         AssetEntity asset = watchlist.getAsset();
         AssetStockDetailEntity stockDetail = asset.getStockDetail();
+        String exchange = firstNonBlank(normalizeExchange(asset.getExchange(), asset.getSymbol()), "UNKNOWN");
+        String region = normalizeRegion(asset.getRegion(), asset.getSymbol(), exchange);
+        if (isUnknownVenueValue(exchange) || isUnknownVenueValue(region)) {
+            VenueHint remoteHint = fetchRemoteVenueHint(asset.getSymbol());
+            exchange = firstNonBlank(
+                    normalizeExchange(remoteHint.exchange(), asset.getSymbol()),
+                    exchange,
+                    "UNKNOWN"
+            );
+            region = normalizeRegion(
+                    firstNonBlank(asset.getRegion(), remoteHint.region()),
+                    asset.getSymbol(),
+                    exchange
+            );
+        }
         BigDecimal latestClose = priceWindow == null ? null : priceWindow.latestClose();
         BigDecimal dailyChange = resolveDailyChange(priceWindow);
         BigDecimal dailyChangePercent = resolveDailyChangePercent(priceWindow);
@@ -317,8 +558,8 @@ public class WatchlistService {
                 asset.getSymbol(),
                 asset.getName(),
                 asset.getCurrency(),
-                asset.getExchange(),
-                asset.getRegion(),
+                exchange,
+                region,
                 stockDetail == null ? null : stockDetail.getSector(),
                 stockDetail == null ? null : stockDetail.getIndustry(),
                 stockDetail == null ? null : stockDetail.getMarketCap(),
@@ -354,5 +595,12 @@ public class WatchlistService {
             String displayName,
             Supplier<List<AssetPriceHistoryItem>> fetcher
     ) {
+    }
+
+    private record VenueHint(
+            String exchange,
+            String region
+    ) {
+        private static final VenueHint EMPTY = new VenueHint(null, null);
     }
 }

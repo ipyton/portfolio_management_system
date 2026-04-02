@@ -1,8 +1,10 @@
 import React from "react";
+import LoadingInline from "../../../components/LoadingInline";
 
 export default function IntroCard({ meta, activityFeed, status, scrollActivity = false }) {
   const statusHeading = String(status?.heading || "").trim();
   const statusMessage = String(status?.message || "").trim();
+  const isStatusLoading = Boolean(status?.loading);
   const showStatusCard = Boolean(statusHeading || statusMessage);
 
   // Render the reserved top introduction panel.
@@ -16,7 +18,11 @@ export default function IntroCard({ meta, activityFeed, status, scrollActivity =
         </div>
         {showStatusCard && (
           <div className="hero-status-card">
-            <strong>{statusHeading}</strong>
+            <strong>
+              {isStatusLoading
+                ? <LoadingInline label={statusHeading || "Loading"} size="xs" />
+                : statusHeading}
+            </strong>
             <p>{statusMessage}</p>
           </div>
         )}

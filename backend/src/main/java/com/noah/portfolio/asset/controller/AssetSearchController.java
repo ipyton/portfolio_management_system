@@ -72,6 +72,19 @@ public class AssetSearchController {
         return assetSearchService.priceHistory(query, days);
     }
 
+    @GetMapping("/candles")
+    @Operation(summary = "Get asset candle history", description = "Returns recent OHLC candles from Twelve Data by interval (1day/1week/1month). Falls back to local close-only candles when Twelve Data is unavailable.")
+    public AssetCandleHistoryResponse candles(
+            @Parameter(description = "Asset symbol or name", example = "AAPL")
+            @RequestParam("query") String query,
+            @Parameter(description = "Lookback window in days", example = "60")
+            @RequestParam(name = "days", required = false) Integer days,
+            @Parameter(description = "Candle interval: 1day, 1week, 1month", example = "1day")
+            @RequestParam(name = "interval", required = false) String interval
+    ) {
+        return assetSearchService.candleHistory(query, days, interval);
+    }
+
     @GetMapping("/world-indices")
     @Operation(summary = "List world indices", description = "Returns world indices configured in local assets table.")
     public AssetWorldIndicesResponse worldIndices() {

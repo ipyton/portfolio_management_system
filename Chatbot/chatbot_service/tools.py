@@ -2,6 +2,7 @@ import requests
 import re
 import time
 import json
+import threading
 from collections.abc import Mapping
 from urllib.parse import parse_qsl
 from .config import settings
@@ -15,6 +16,8 @@ _SQL_FORBIDDEN_RE = re.compile(
 )
 _SQL_INTO_FILE_RE = re.compile(r"\binto\s+(outfile|dumpfile)\b", re.I)
 _SQL_NAMED_PARAM_RE = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)")
+_TWELVEDATA_KEY_LOCK = threading.Lock()
+_TWELVEDATA_KEY_CURSOR = 0
 
 
 def _strip_sql_comments(sql: str) -> str:
@@ -244,51 +247,123 @@ def _request_twelvedata_json(url: str, params: dict, attempts: int = 2) -> dict:
     raise ValueError(f"TwelveData request failed: {last_error}")
 
 
-def _is_twelvedata_interval_error(payload: dict) -> bool:
+def _is_twelvedata_error_payload(payload: dict) -> bool:
     if not isinstance(payload, dict):
         return False
-    if str(payload.get("status", "")).lower() != "error":
+    return str(payload.get("status", "")).lower() == "error"
+
+
+def _is_twelvedata_interval_error(payload: dict) -> bool:
+    if not _is_twelvedata_error_payload(payload):
         return False
     message = str(payload.get("message", "")).lower()
     return "interval" in message
 
 
+def _is_twelvedata_quota_error(payload: dict) -> bool:
+    if not _is_twelvedata_error_payload(payload):
+        return False
+
+    code = str(payload.get("code", "")).strip().lower()
+    if code == "429":
+        return True
+
+    message = str(payload.get("message", "")).lower()
+    quota_markers = (
+        "api credits",
+        "rate limit",
+        "too many requests",
+        "quota",
+        "limit reached",
+        "per minute",
+        "throttl",
+    )
+    return any(marker in message for marker in quota_markers)
+
+
+def _format_twelvedata_error(payload: dict) -> str:
+    code = payload.get("code")
+    message = payload.get("message") or "TwelveData returned status=error"
+    if code is not None:
+        return f"TwelveData error ({code}): {message}"
+    return f"TwelveData error: {message}"
+
+
+def _get_twelvedata_api_keys() -> list[str]:
+    if settings.twelvedata_api_keys:
+        return [key for key in settings.twelvedata_api_keys if key]
+    if settings.twelvedata_api_key:
+        return [settings.twelvedata_api_key]
+    return []
+
+
+def _ordered_twelvedata_keys(keys: list[str]) -> list[tuple[int, str]]:
+    if not keys:
+        return []
+    if len(keys) == 1:
+        return [(1, keys[0])]
+
+    global _TWELVEDATA_KEY_CURSOR
+    with _TWELVEDATA_KEY_LOCK:
+        start = _TWELVEDATA_KEY_CURSOR % len(keys)
+        _TWELVEDATA_KEY_CURSOR = (_TWELVEDATA_KEY_CURSOR + 1) % len(keys)
+
+    ordered: list[tuple[int, str]] = []
+    for offset in range(len(keys)):
+        idx = (start + offset) % len(keys)
+        ordered.append((idx + 1, keys[idx]))
+    return ordered
+
+
 def twelvedata_search(query: str | dict, path: str | None = None):
-    if not settings.twelvedata_api_key:
-        raise ValueError("TWELVEDATA_API_KEY is missing")
+    api_keys = _get_twelvedata_api_keys()
+    if not api_keys:
+        raise ValueError("TWELVEDATA_API_KEY/TWELVEDATA_API_KEYS is missing")
 
     endpoint, endpoint_params = _normalize_twelvedata_endpoint(path)
     url = f"https://api.twelvedata.com/{endpoint}"
-    params = {"apikey": settings.twelvedata_api_key}
-    params.update(endpoint_params)
+    base_params = dict(endpoint_params)
 
     parsed_query_params = _parse_twelvedata_query(query)
-    params.update(parsed_query_params)
-    _apply_twelvedata_defaults(endpoint, params)
+    base_params.update(parsed_query_params)
+    _apply_twelvedata_defaults(endpoint, base_params)
 
-    payload = _request_twelvedata_json(url, params)
+    attempts: list[str] = []
+    for key_index, api_key in _ordered_twelvedata_keys(api_keys):
+        params = {"apikey": api_key}
+        params.update(base_params)
 
-    # One targeted retry for interval-related planner drift.
-    if _is_twelvedata_interval_error(payload) and endpoint == "time_series":
-        retry_params = dict(params)
-        retry_params["interval"] = "1day"
-        retry_params.setdefault("outputsize", "30")
-        payload = _request_twelvedata_json(url, retry_params)
+        try:
+            payload = _request_twelvedata_json(url, params)
 
-    if isinstance(payload, dict) and str(payload.get("status", "")).lower() == "error":
-        code = payload.get("code")
-        message = payload.get("message") or "TwelveData returned status=error"
-        if code is not None:
-            raise ValueError(f"TwelveData error ({code}): {message}")
-        raise ValueError(f"TwelveData error: {message}")
+            # One targeted retry for interval-related planner drift.
+            if _is_twelvedata_interval_error(payload) and endpoint == "time_series":
+                retry_params = dict(params)
+                retry_params["interval"] = "1day"
+                retry_params.setdefault("outputsize", "30")
+                payload = _request_twelvedata_json(url, retry_params)
+        except ValueError as exc:
+            attempts.append(f"key#{key_index}: {exc}")
+            continue
 
-    return {
-        "source": "twelvedata",
-        "success": True,
-        "error": None,
-        "endpoint": endpoint,
-        "data": payload,
-    }
+        if _is_twelvedata_error_payload(payload):
+            formatted_error = _format_twelvedata_error(payload)
+            if _is_twelvedata_quota_error(payload) and len(api_keys) > 1:
+                attempts.append(f"key#{key_index}: {formatted_error}")
+                continue
+            raise ValueError(formatted_error)
+
+        return {
+            "source": "twelvedata",
+            "success": True,
+            "error": None,
+            "endpoint": endpoint,
+            "data": payload,
+        }
+
+    if attempts:
+        raise ValueError("TwelveData request failed after exhausting all API keys: " + " | ".join(attempts))
+    raise ValueError("TwelveData request failed: no usable API key")
 
 
 def load_schema_text(schema_text: str):

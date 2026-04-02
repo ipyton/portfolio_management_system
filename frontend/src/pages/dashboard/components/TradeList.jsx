@@ -1,4 +1,5 @@
 import React from "react";
+import LoadingInline from "../../../components/LoadingInline";
 import { formatCurrency } from "../../../lib/api";
 
 function splitTradeDateTime(value) {
@@ -61,7 +62,7 @@ export default function TradeList({
             ))}
             <p style={{ marginTop: 2 }}>
               {isLoading
-                ? "Loading live trade data..."
+                ? <LoadingInline label="Loading live trade data..." size="xs" tone="muted" />
                 : dataUnavailable
                   ? "Live trade data is unavailable right now."
                   : selectedSymbol

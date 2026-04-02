@@ -1,4 +1,5 @@
 import React from "react";
+import LoadingInline from "../../../components/LoadingInline";
 
 export default function TradeModals({
   tradeModal,
@@ -138,7 +139,7 @@ export default function TradeModals({
                 disabled={disableSubmit}
                 onClick={onConfirmTrade}
               >
-                {tradeSubmitting ? "Submitting..." : "Submit"}
+                {tradeSubmitting ? <LoadingInline label="Submitting..." size="xs" tone="inverted" /> : "Submit"}
               </button>
             </div>
           </div>

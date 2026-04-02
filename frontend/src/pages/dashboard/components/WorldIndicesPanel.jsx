@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import LoadingInline from "../../../components/LoadingInline";
 import { apiFetch } from "../../../lib/api";
 
 const PAGE_SIZE = 5;
@@ -32,6 +33,38 @@ const DEFAULT_WORLD_INDICES = [
   { symbol: "TWII", name: "TAIEX", region: "TW" },
   { symbol: "IBOV", name: "Ibovespa", region: "BR" },
 ];
+const DEFAULT_REGION_BY_SYMBOL = new Map(DEFAULT_WORLD_INDICES.map((item) => [item.symbol, item.region]));
+const REGION_DISPLAY_NAMES = {
+  US: "United States",
+  CN: "China",
+  HK: "Hong Kong",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  JP: "Japan",
+  IN: "India",
+  AU: "Australia",
+  KR: "South Korea",
+  CA: "Canada",
+  SG: "Singapore",
+  TW: "Taiwan",
+  BR: "Brazil",
+};
+const REGION_ALIASES = {
+  USA: "US",
+  UNITEDSTATES: "US",
+  UNITEDSTATESOFAMERICA: "US",
+  CHINA: "CN",
+  MAINLANDCHINA: "CN",
+  PEOPLESREPUBLICOFCHINA: "CN",
+  HONGKONG: "HK",
+  UNITEDKINGDOM: "UK",
+  GREATBRITAIN: "UK",
+  GB: "UK",
+  ASIASHANGHAI: "CN",
+  AMERICANEWYORK: "US",
+  EUROPELONDON: "UK",
+};
 
 const CN_BENCHMARK_ALIASES = new Set([
   "000300.SH",
@@ -88,6 +121,47 @@ function toDateOrNull(value) {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
   return null;
+}
+
+function inferRegionFromSymbol(symbol) {
+  const upper = typeof symbol === "string" ? symbol.toUpperCase() : "";
+  if (!upper) {
+    return "UNKNOWN";
+  }
+  if (upper.endsWith(".SH") || upper.endsWith(".SZ") || upper.endsWith(".SS") || upper === "000300.SH") {
+    return "CN";
+  }
+  if (upper.endsWith(".HK") || upper === "HSI") {
+    return "HK";
+  }
+  return DEFAULT_REGION_BY_SYMBOL.get(upper) || "US";
+}
+
+function normalizeRegionCode(raw, symbol) {
+  if (typeof raw === "string" && raw.trim()) {
+    const upper = raw.trim().toUpperCase();
+    if (["UNKNOWN", "N/A", "NA", "NONE", "NULL"].includes(upper)) {
+      return inferRegionFromSymbol(symbol);
+    }
+    const collapsed = upper.replace(/[^A-Z0-9]/g, "");
+    if (collapsed) {
+      if (REGION_ALIASES[collapsed]) {
+        return REGION_ALIASES[collapsed];
+      }
+      if (collapsed.length === 2) {
+        return collapsed;
+      }
+    }
+  }
+  return inferRegionFromSymbol(symbol);
+}
+
+function formatRegionDisplay(code) {
+  if (typeof code !== "string" || !code.trim()) {
+    return "Unknown";
+  }
+  const normalized = code.trim().toUpperCase();
+  return REGION_DISPLAY_NAMES[normalized] || normalized;
 }
 
 function formatPrice(value) {
@@ -175,9 +249,7 @@ function normalizeIndexItem(raw) {
   const name = typeof raw?.name === "string" && raw.name.trim()
     ? raw.name.trim()
     : symbol;
-  const region = typeof raw?.region === "string" && raw.region.trim()
-    ? raw.region.trim().toUpperCase()
-    : "N/A";
+  const region = normalizeRegionCode(raw?.region, symbol);
   const latestTradeDate = toDateOrNull(raw?.latestTradeDate);
   const latestClose = toNumber(raw?.latestClose);
   const previousClose = toNumber(raw?.previousClose);
@@ -557,7 +629,11 @@ export default function WorldIndicesPanel() {
       </div>
 
       <div className="world-indices-status-row">
-        <strong>{statusText}</strong>
+        <strong>
+          {isLoading
+            ? <LoadingInline label={statusText} size="xs" tone="muted" />
+            : statusText}
+        </strong>
         {errorMessage ? <span>{errorMessage}</span> : null}
       </div>
 
@@ -572,7 +648,7 @@ export default function WorldIndicesPanel() {
             <article key={item.symbol} className="world-index-row">
               <div className="world-index-main">
                 <strong>{item.name}</strong>
-                <span>{item.symbol} · {item.region}</span>
+                <span>{item.symbol} · {formatRegionDisplay(item.region)}</span>
                 <p className={`world-index-main-line ${tone}`}>
                   {formatPrice(item.latest)} · {formatChange(item.change, item.changePct)}
                 </p>
