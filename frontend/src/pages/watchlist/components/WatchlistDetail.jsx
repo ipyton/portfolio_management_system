@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
 import LoadingInline from "../../../components/LoadingInline";
 import {
@@ -52,6 +52,19 @@ const formatChartHourMinute = (value) => {
   return normalized;
 };
 
+const toSortableTimestamp = (value) => {
+  if (typeof value !== "string" || !value.trim()) {
+    return Number.NaN;
+  }
+  const normalized = value.replace(" ", "T");
+  const direct = Date.parse(normalized);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+  const fallback = Date.parse(normalized.slice(0, 19));
+  return Number.isFinite(fallback) ? fallback : Number.NaN;
+};
+
 const CANDLE_INTERVAL_OPTIONS = [
   { value: "1day", label: "1D" },
   { value: "1month", label: "1M" },
@@ -86,6 +99,8 @@ export default function WatchlistDetail({
   toUsdAmount,
 }) {
   const candleChartRef = useRef(null);
+  const candleChartInstanceRef = useRef(null);
+  const zoomRangeRef = useRef({ start: 0, end: 100 });
   const isDarkMode =
     typeof document !== "undefined"
     && document.documentElement.getAttribute("data-theme") !== "light";
@@ -114,7 +129,21 @@ export default function WatchlistDetail({
           && Number.isFinite(Number(point.high))
           && Number.isFinite(Number(point.low))
           && Number.isFinite(Number(point.close)),
-      );
+      )
+      .sort((left, right) => {
+        const leftTs = toSortableTimestamp(left.date);
+        const rightTs = toSortableTimestamp(right.date);
+        if (Number.isFinite(leftTs) && Number.isFinite(rightTs)) {
+          return leftTs - rightTs;
+        }
+        if (Number.isFinite(leftTs)) {
+          return -1;
+        }
+        if (Number.isFinite(rightTs)) {
+          return 1;
+        }
+        return String(left.date).localeCompare(String(right.date));
+      });
   }, [selected, toUsdAmount]);
 
   const chartData = useMemo(() => {
@@ -125,7 +154,21 @@ export default function WatchlistDetail({
         const usdPrice = toUsdAmount ? toUsdAmount(point?.price, sourceCurrency) : null;
         return { ...point, price: usdPrice };
       })
-      .filter((point) => Number.isFinite(Number(point.price)));
+      .filter((point) => Number.isFinite(Number(point.price)))
+      .sort((left, right) => {
+        const leftTs = toSortableTimestamp(left?.date);
+        const rightTs = toSortableTimestamp(right?.date);
+        if (Number.isFinite(leftTs) && Number.isFinite(rightTs)) {
+          return leftTs - rightTs;
+        }
+        if (Number.isFinite(leftTs)) {
+          return -1;
+        }
+        if (Number.isFinite(rightTs)) {
+          return 1;
+        }
+        return String(left?.date || "").localeCompare(String(right?.date || ""));
+      });
   }, [selected, toUsdAmount]);
   const chartPalette = useMemo(
     () => (
@@ -158,6 +201,47 @@ export default function WatchlistDetail({
     [isDarkMode],
   );
   const hasCandleData = candleData.length > 0;
+  const clampZoomPercent = useCallback((value) => Math.max(0, Math.min(100, value)), []);
+
+  const handleZoomChange = useCallback(
+    (scaleFactor) => {
+      const chart = candleChartInstanceRef.current;
+      if (!chart) {
+        return;
+      }
+
+      const currentStart = Number(zoomRangeRef.current?.start);
+      const currentEnd = Number(zoomRangeRef.current?.end);
+      const safeStart = Number.isFinite(currentStart) ? currentStart : 0;
+      const safeEnd = Number.isFinite(currentEnd) ? currentEnd : 100;
+      const currentSpan = Math.max(2, safeEnd - safeStart);
+      const nextSpan = Math.max(2, Math.min(100, currentSpan * scaleFactor));
+      const center = (safeStart + safeEnd) / 2;
+      const maxStart = 100 - nextSpan;
+      const nextStart = Math.max(0, Math.min(maxStart, center - nextSpan / 2));
+      const nextEnd = nextStart + nextSpan;
+
+      zoomRangeRef.current = {
+        start: clampZoomPercent(nextStart),
+        end: clampZoomPercent(nextEnd),
+      };
+      chart.dispatchAction({
+        type: "dataZoom",
+        dataZoomIndex: 0,
+        start: zoomRangeRef.current.start,
+        end: zoomRangeRef.current.end,
+      });
+    },
+    [clampZoomPercent],
+  );
+
+  const handleZoomIn = useCallback(() => {
+    handleZoomChange(0.8);
+  }, [handleZoomChange]);
+
+  const handleZoomOut = useCallback(() => {
+    handleZoomChange(1.25);
+  }, [handleZoomChange]);
 
   useEffect(() => {
     if (!hasCandleData || !candleChartRef.current) {
@@ -165,6 +249,8 @@ export default function WatchlistDetail({
     }
 
     const chart = echarts.init(candleChartRef.current);
+    candleChartInstanceRef.current = chart;
+    zoomRangeRef.current = { start: 0, end: 100 };
     chart.setOption({
       animation: false,
       grid: { top: 14, right: 14, bottom: 30, left: 48 },
@@ -191,6 +277,18 @@ export default function WatchlistDetail({
           ].join("<br/>");
         },
       },
+      dataZoom: [
+        {
+          type: "inside",
+          xAxisIndex: 0,
+          start: 0,
+          end: 100,
+          zoomOnMouseWheel: true,
+          moveOnMouseWheel: true,
+          moveOnMouseMove: true,
+          filterMode: "none",
+        },
+      ],
       xAxis: {
         type: "category",
         data: candleData.map((point) => point.date),
@@ -219,8 +317,39 @@ export default function WatchlistDetail({
             borderColor0: chartPalette.bearish,
           },
         },
+        {
+          type: "line",
+          data: candleData.map((point) => point.close),
+          smooth: true,
+          symbol: "none",
+          lineStyle: {
+            color: chartPalette.line,
+            width: 2.2,
+          },
+          z: 3,
+          emphasis: {
+            disabled: true,
+          },
+        },
       ],
     }, true);
+    const syncZoomRange = () => {
+      const option = chart.getOption();
+      const zoomOption = option?.dataZoom?.[0];
+      if (!zoomOption) {
+        return;
+      }
+      const nextStart = Number(zoomOption.start);
+      const nextEnd = Number(zoomOption.end);
+      if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd)) {
+        return;
+      }
+      zoomRangeRef.current = {
+        start: clampZoomPercent(nextStart),
+        end: clampZoomPercent(nextEnd),
+      };
+    };
+    chart.on("datazoom", syncZoomRange);
 
     const handleResize = () => {
       chart.resize();
@@ -237,9 +366,13 @@ export default function WatchlistDetail({
       window.cancelAnimationFrame(rafId);
       observer?.disconnect();
       window.removeEventListener("resize", handleResize);
+      chart.off("datazoom", syncZoomRange);
+      if (candleChartInstanceRef.current === chart) {
+        candleChartInstanceRef.current = null;
+      }
       chart.dispose();
     };
-  }, [hasCandleData, candleData, chartPalette, candleInterval]);
+  }, [hasCandleData, candleData, chartPalette, candleInterval, clampZoomPercent]);
 
   if (!selected) {
     return (
@@ -269,62 +402,21 @@ export default function WatchlistDetail({
           ))}
         </div>
       </div>
-      <div className="chart-placeholder" aria-hidden="true">
+      <div className="chart-placeholder">
         {hasCandleData ? (
-          <div ref={candleChartRef} className="watchlist-candle-chart" />
+          <div className="watchlist-candle-chart-wrap">
+            <div ref={candleChartRef} className="watchlist-candle-chart" />
+            <div className="chart-zoom-controls" role="group" aria-label="Chart zoom controls">
+              <button type="button" className="chart-zoom-btn" onClick={handleZoomIn} aria-label="Zoom in">
+                +
+              </button>
+              <button type="button" className="chart-zoom-btn" onClick={handleZoomOut} aria-label="Zoom out">
+                -
+              </button>
+            </div>
+          </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={chartData}
-              margin={{ top: 10, right: 12, bottom: 16, left: 16 }}
-            >
-              <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tickFormatter={(value) => formatChartTick(value, candleInterval)}
-                minTickGap={40}
-                tick={{ fontSize: 11, fill: chartPalette.tick }}
-                tickMargin={8}
-                axisLine={{ stroke: chartPalette.axis }}
-                tickLine={{ stroke: chartPalette.axis }}
-              />
-              <YAxis
-                domain={["dataMin", "dataMax"]}
-                tick={{ fontSize: 11, fill: chartPalette.tick }}
-                tickMargin={8}
-                axisLine={{ stroke: chartPalette.axis }}
-                tickLine={{ stroke: chartPalette.axis }}
-                width={40}
-              />
-              <Tooltip
-                formatter={(value) => [formatCurrency(value, "USD"), "Price (USD)"]}
-                labelFormatter={(label) => `Date: ${label}`}
-                isAnimationActive={false}
-                contentStyle={{
-                  background: chartPalette.tooltipBg,
-                  border: `1px solid ${chartPalette.tooltipBorder}`,
-                  borderRadius: 10,
-                  color: chartPalette.tooltipText,
-                }}
-                labelStyle={{ color: chartPalette.tooltipText }}
-                itemStyle={{ color: chartPalette.tooltipText }}
-              />
-              <Line
-                type="monotone"
-                dataKey="price"
-                stroke={chartPalette.line}
-                strokeWidth={3}
-                isAnimationActive={false}
-                activeDot={{
-                  r: 4,
-                  fill: chartPalette.line,
-                  stroke: chartPalette.pointStroke,
-                  strokeWidth: 2,
-                }}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <div className="chart-placeholder-empty">No candle data for selected interval.</div>
         )}
       </div>
       <div className="stats-grid">

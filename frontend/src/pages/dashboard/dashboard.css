@@ -29,6 +29,7 @@
   bottom: 0;
   left: -64px;
   right: -64px;
+  pointer-events: none;
 }
 
 /* Slider shell */
@@ -270,6 +271,10 @@
 
 .dashboard-page .activity-list-ticker:hover .activity-list-ticker-track {
   animation-play-state: paused;
+}
+
+.dashboard-page .activity-list-ticker .activity-item p {
+  color: #111111;
 }
 
 @keyframes dashboard-news-ticker {
@@ -569,6 +574,19 @@
   stroke-linejoin: round;
 }
 
+.trade-list-card {
+  background: #ffffff;
+}
+
+.trade-list-item {
+  background: #ffffff;
+  border-color: rgba(108, 125, 158, 0.18);
+}
+
+.dashboard-page .trade-list-item p {
+  color: #111111;
+}
+
 .world-index-sparkline-empty {
   font-size: 0.76rem;
   color: var(--muted);
@@ -637,6 +655,24 @@
 
 :root:not([data-theme="light"]) .slide-progress {
   background: rgba(148, 163, 184, 0.25);
+}
+
+:root:not([data-theme="light"]) .trade-list-card {
+  background: linear-gradient(180deg, rgba(7, 10, 16, 0.98), rgba(4, 7, 12, 0.98));
+  border-color: rgba(93, 110, 150, 0.28);
+}
+
+:root:not([data-theme="light"]) .trade-list-item {
+  background: linear-gradient(180deg, rgba(10, 14, 22, 0.96), rgba(7, 10, 16, 0.96));
+  border-color: rgba(93, 110, 150, 0.24);
+}
+
+:root:not([data-theme="light"]) .dashboard-page .trade-list-item p {
+  color: #ffffff;
+}
+
+:root:not([data-theme="light"]) .dashboard-page .activity-list-ticker .activity-item p {
+  color: #ffffff;
 }
 
 /* Responsive */
