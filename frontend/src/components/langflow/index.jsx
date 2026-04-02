@@ -890,43 +890,39 @@ export default function LangflowWidget({ themeMode }) {
               </Typography>
             )}
             <Stack direction="row" spacing={1} alignItems="flex-end">
-              <TextField
-                fullWidth
-                multiline
-                minRows={isMobile ? 2 : 2}
-                maxRows={6}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="你可以输入任何东西..."
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                size="small"
-              />
-              <Badge color="warning" variant="dot" invisible={!isStreaming}>
-                <IconButton
-                  color="primary"
-                  onClick={sendMessage}
-                  disabled={isStreaming || !draft.trim()}
-                  sx={{
-                    border: "1px solid",
-                    borderColor: "divider",
-                    borderRadius: 2,
-                    width: 40,
-                    height: 40,
-                  }}
-                >
-                  {isStreaming ? <CircularProgress size={18} /> : <SendRoundedIcon />}
-                </IconButton>
-              </Badge>
-            </Stack>
-            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-              <Chip size="small" icon={<ImageRoundedIcon />} label="Image output enabled" variant="outlined" />
-              <Chip size="small" label="Gemini backend" variant="outlined" />
-            </Stack>
+              <TextField
+                fullWidth
+                multiline
+                minRows={isMobile ? 2 : 2}
+                maxRows={6}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="Could input anything here."
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                size="small"
+              />
+              <Badge color="warning" variant="dot" invisible={!isStreaming}>
+                <IconButton
+                  color="primary"
+                  onClick={sendMessage}
+                  disabled={isStreaming || !draft.trim()}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                    width: 40,
+                    height: 40,
+                  }}
+                >
+                  {isStreaming ? <CircularProgress size={18} /> : <SendRoundedIcon />}
+                </IconButton>
+              </Badge>
+            </Stack>
           </Box>
         </Paper>
       )}

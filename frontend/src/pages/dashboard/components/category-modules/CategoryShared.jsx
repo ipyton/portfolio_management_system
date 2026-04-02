@@ -143,7 +143,7 @@ export function BenchmarkChart({ primary, secondary, labels }) {
   );
 }
 
-export function PnlSparkline({ points, labels }) {
+export function PnlSparkline({ points, labels, accent = "#1f4ed8" }) {
   const [hover, setHover] = useState(null);
   const W = 360;
   const H = 130;
@@ -199,7 +199,7 @@ export function PnlSparkline({ points, labels }) {
             strokeWidth="1"
           />
         ))}
-        <path d={path} fill="none" stroke="#16a34a" strokeWidth="2.4" />
+        <path d={path} fill="none" stroke={accent} strokeWidth="2.4" />
         {Array.from({ length: Math.min(7, n) }, (_, i) => Math.round((i / Math.max(Math.min(7, n) - 1, 1)) * (n - 1))).map((idx) => (
           <text key={idx} x={xOf(idx)} y={H - 6} textAnchor="middle" fill="#9ca3af" fontSize="9">
             {xLabels[idx]}
@@ -208,7 +208,7 @@ export function PnlSparkline({ points, labels }) {
         {hover !== null && (
           <g>
             <line x1={xOf(hover)} y1={PAD.top} x2={xOf(hover)} y2={H - PAD.bottom} stroke="rgba(17,24,39,0.2)" strokeWidth="1" strokeDasharray="2 2" />
-            <circle cx={xOf(hover)} cy={yOf(points[hover])} r="4" fill="#ffffff" stroke="#16a34a" strokeWidth="2" />
+            <circle cx={xOf(hover)} cy={yOf(points[hover])} r="4" fill="#ffffff" stroke={accent} strokeWidth="2" />
           </g>
         )}
       </svg>

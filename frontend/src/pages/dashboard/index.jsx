@@ -36,13 +36,12 @@ const DEFAULT_CATEGORIES = [
     id: "realtime",
     label: "Realtime",
     eyebrow: "Live Snapshot",
-    accent: "#38bdf8",
+    accent: "#1f4ed8",
     pnl: { value: "+$12,480", detail: "Mark-to-market · Today" },
     metrics: [
       { key: "holdingMarketValue", label: "Holding Market Value", value: "$1.84M", detail: "Current positions" },
       { key: "cashBalance", label: "Cash Balance", value: "$312,500", detail: "Available cash" },
       { key: "availableFunds", label: "Available Funds", value: "$298,000", detail: "Post-settlement" },
-      { key: "cashByCurrency", label: "Cash by Currency", value: "USD / HKD", detail: "Multi-currency" },
       { key: "holdings", label: "Holdings Count", value: "42", detail: "Active positions" },
     ],
   },
@@ -50,7 +49,7 @@ const DEFAULT_CATEGORIES = [
     id: "performance",
     label: "Performance",
     eyebrow: "Returns & Benchmarks",
-    accent: "#4f7bff",
+    accent: "#1f4ed8",
     metrics: [
       { key: "totalReturn", label: "Total Return", value: "+18.4%", detail: "Since inception" },
       { key: "annualizedReturn", label: "Annualized Return", value: "+12.8%", detail: "CAGR" },
@@ -61,7 +60,7 @@ const DEFAULT_CATEGORIES = [
     id: "risk",
     label: "Risk",
     eyebrow: "Volatility & Ratios",
-    accent: "#f59e0b",
+    accent: "#1f4ed8",
     metrics: [
       { key: "annualizedVolatility", label: "Annualized Volatility", value: "14.7%", detail: "1Y rolling" },
       { key: "maxDrawdown", label: "Max Drawdown", value: "-8.3%", detail: "Peak to trough" },
@@ -75,7 +74,7 @@ const DEFAULT_CATEGORIES = [
     id: "holdings",
     label: "Holdings",
     eyebrow: "Distribution & Concentration",
-    accent: "#7bd88f",
+    accent: "#1f4ed8",
     metrics: [
       { key: "assetClassDistribution", label: "Asset Class", value: "62% EQ", detail: "Equity dominant" },
       { key: "regionDistribution", label: "Region", value: "US 74%", detail: "Geographic breakdown" },
@@ -86,7 +85,7 @@ const DEFAULT_CATEGORIES = [
     id: "trading",
     label: "Trading",
     eyebrow: "Activity & Costs",
-    accent: "#c084fc",
+    accent: "#1f4ed8",
     metrics: [
       { key: "turnoverRate", label: "Turnover Rate", value: "34.2%", detail: "Last 12 months" },
       { key: "transactionAmount", label: "Transaction Amount", value: "$2.4M", detail: "Total traded" },
@@ -419,10 +418,6 @@ function buildLiveCategories(payload) {
     && availablePortfolioReturns < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
 
   const realtimeHoldings = Array.isArray(realtime.holdings) ? realtime.holdings : [];
-  const cashByCurrency = Array.isArray(realtime.cashByCurrency) ? realtime.cashByCurrency : [];
-  const cashCurrencyText = cashByCurrency.length
-    ? cashByCurrency.map((item) => item.currency).filter(Boolean).join(" / ")
-    : "N/A";
 
   const assetClassDistribution = Array.isArray(holdings.assetClassDistribution)
     ? holdings.assetClassDistribution
@@ -462,7 +457,7 @@ function buildLiveCategories(payload) {
       id: "realtime",
       label: "Realtime",
       eyebrow: "Live Snapshot",
-      accent: "#38bdf8",
+      accent: "#1f4ed8",
       pnl: {
         value: formatCurrency(realtime.todayPnl, reportingCurrency),
         detail: `Mark-to-market · As of ${asOf}`,
@@ -487,12 +482,6 @@ function buildLiveCategories(payload) {
           detail: "Post-settlement",
         },
         {
-          key: "cashByCurrency",
-          label: "Cash by Currency",
-          value: cashCurrencyText,
-          detail: "Multi-currency",
-        },
-        {
           key: "holdings",
           label: "Holdings Count",
           value: String(realtimeHoldings.length),
@@ -504,7 +493,7 @@ function buildLiveCategories(payload) {
       id: "performance",
       label: "Performance",
       eyebrow: "Returns & Benchmarks",
-      accent: "#4f7bff",
+      accent: "#1f4ed8",
       metrics: [
         {
           key: "totalReturn",
@@ -532,7 +521,7 @@ function buildLiveCategories(payload) {
       id: "risk",
       label: "Risk",
       eyebrow: "Volatility & Ratios",
-      accent: "#f59e0b",
+      accent: "#1f4ed8",
       metrics: [
         {
           key: "annualizedVolatility",
@@ -580,7 +569,7 @@ function buildLiveCategories(payload) {
       id: "holdings",
       label: "Holdings",
       eyebrow: "Distribution & Concentration",
-      accent: "#7bd88f",
+      accent: "#1f4ed8",
       metrics: [
         {
           key: "assetClassDistribution",
@@ -611,7 +600,7 @@ function buildLiveCategories(payload) {
       id: "trading",
       label: "Trading",
       eyebrow: "Activity & Costs",
-      accent: "#c084fc",
+      accent: "#1f4ed8",
       metrics: [
         {
           key: "turnoverRate",

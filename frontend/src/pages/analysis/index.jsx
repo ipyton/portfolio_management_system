@@ -3,7 +3,6 @@ import LoadingInline from "../../components/LoadingInline";
 import {
   apiFetch,
   classForDelta,
-  formatDate,
   formatPercent,
   formatSignedPercent,
 } from "../../lib/api";
@@ -17,7 +16,6 @@ export const analysisPageMeta = {
   metrics: [],
 };
 
-const BACKTEST_WINDOWS = [30, 90, 180, 365];
 const SIMULATION_STEPS = [90, 126, 252, 365];
 const SIMULATION_PATHS = [200, 500, 1000];
 const NUM_RANDOM_PORTFOLIOS = 10000;
@@ -97,152 +95,6 @@ function getSvgPointer(event, width, height) {
   const x = bounds.width > 0 ? ((event.clientX - bounds.left) / bounds.width) * width : 0;
   const y = bounds.height > 0 ? ((event.clientY - bounds.top) / bounds.height) * height : 0;
   return { x, y };
-}
-
-function BacktestChart({ points }) {
-  const [hoverState, setHoverState] = useState(null);
-
-  if (!points?.length) {
-    return (
-      <div className="history-empty">
-        <strong>No backtest data</strong>
-        <p>Run backtest.</p>
-      </div>
-    );
-  }
-
-  const series = points.filter((item) => Number.isFinite(Number(item.nav)));
-  const values = series.map((item) => Number(item.nav));
-  if (!values.length) {
-    return (
-      <div className="history-empty">
-        <strong>Invalid backtest data</strong>
-        <p>Try again.</p>
-      </div>
-    );
-  }
-
-  const width = 560;
-  const height = 220;
-  const margin = { top: 10, right: 10, bottom: 32, left: 52 };
-  const chartWidth = width - margin.left - margin.right;
-  const chartHeight = height - margin.top - margin.bottom;
-  const base = Number(series[0]?.nav) || 1;
-
-  const rawMin = Math.min(...values);
-  const rawMax = Math.max(...values);
-  const yPadding = rawMax === rawMin ? Math.max(Math.abs(rawMax) * 0.04, 0.05) : (rawMax - rawMin) * 0.08;
-  const yMin = rawMin - yPadding;
-  const yMax = rawMax + yPadding;
-  const yRange = yMax - yMin || 1;
-
-  const mapX = (index) =>
-    margin.left + (series.length > 1 ? (index / (series.length - 1)) * chartWidth : chartWidth / 2);
-  const mapY = (value) => margin.top + ((yMax - value) / yRange) * chartHeight;
-
-  const path = series
-    .map((item, index) => {
-      const x = mapX(index);
-      const y = mapY(Number(item.nav));
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-
-  const totalReturn = Number(series[series.length - 1].nav) / base - 1;
-  const yTicks = createLinearTicks(yMin, yMax, 5);
-  const xTickIndexes = buildIndexTicks(series.length, 5);
-  const hoveredPoint = hoverState ? series[hoverState.index] : null;
-  const hoverX = hoveredPoint ? mapX(hoverState.index) : null;
-  const hoverY = hoveredPoint ? mapY(Number(hoveredPoint.nav)) : null;
-  const hoverReturn = hoveredPoint ? Number(hoveredPoint.nav) / base - 1 : null;
-  const hoverLineX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
-  const tooltipX = hoverState ? clamp(hoverState.pointerX, margin.left, width - margin.right) : null;
-  const tooltipY = hoverState ? clamp(hoverState.pointerY, margin.top, height - margin.bottom) : null;
-
-  function handleMouseMove(event) {
-    const pointer = getSvgPointer(event, width, height);
-    const svgX = clamp(pointer.x, margin.left, width - margin.right);
-    const ratio = clamp((svgX - margin.left) / chartWidth, 0, 1);
-    const index = Math.round(ratio * (series.length - 1));
-    setHoverState({
-      index,
-      pointerX: svgX,
-      pointerY: clamp(pointer.y, margin.top, height - margin.bottom),
-    });
-  }
-
-  return (
-    <div className="history-chart">
-      <div className="history-meta">
-        <span>Portfolio NAV</span>
-        <strong className={classForDelta(totalReturn)}>
-          {formatSignedPercent(totalReturn)}
-        </strong>
-      </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="Backtest NAV chart"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverState(null)}
-      >
-        {yTicks.map((tick) => {
-          const y = mapY(tick);
-          return (
-            <g key={`backtest-y-${tick.toFixed(6)}`}>
-              <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="chart-grid-line" />
-              <text x={margin.left - 8} y={y + 3} textAnchor="end" className="chart-axis-text">
-                {formatPercent(tick / base - 1, 1)}
-              </text>
-            </g>
-          );
-        })}
-        {xTickIndexes.map((index) => {
-          const x = mapX(index);
-          return (
-            <g key={`backtest-x-${index}`}>
-              <line x1={x} y1={margin.top} x2={x} y2={height - margin.bottom} className="chart-grid-line" />
-              <text x={x} y={height - margin.bottom + 14} textAnchor="middle" className="chart-axis-text">
-                {shortDateLabel(series[index]?.date)}
-              </text>
-            </g>
-          );
-        })}
-        <line
-          x1={margin.left}
-          y1={height - margin.bottom}
-          x2={width - margin.right}
-          y2={height - margin.bottom}
-          className="chart-axis"
-        />
-        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} className="chart-axis" />
-        <path d={path} className="history-line" />
-        {hoveredPoint ? (
-          <>
-            <line
-              x1={hoverLineX}
-              y1={margin.top}
-              x2={hoverLineX}
-              y2={height - margin.bottom}
-              className="chart-hover-line"
-            />
-            <circle cx={hoverX} cy={hoverY} r="4" className="chart-hover-dot" />
-            <SvgTooltip
-              x={tooltipX}
-              y={tooltipY}
-              chartWidth={width}
-              chartHeight={height}
-              lines={[
-                `${shortDateLabel(hoveredPoint.date)}`,
-                `NAV ${(Number(hoveredPoint.nav) || 0).toFixed(4)}`,
-                `Return ${formatSignedPercent(hoverReturn || 0)}`,
-              ]}
-            />
-          </>
-        ) : null}
-      </svg>
-    </div>
-  );
 }
 
 function SimulationChart({ meanPath, samplePaths }) {
@@ -699,70 +551,6 @@ function OptimalWeightsChart({ weights }) {
   );
 }
 
-function computeMaxDrawdown(points) {
-  if (!points.length) {
-    return null;
-  }
-
-  let peak = Number(points[0].nav);
-  let maxDrawdown = 0;
-  points.forEach((point) => {
-    const nav = Number(point.nav);
-    if (nav > peak) {
-      peak = nav;
-    }
-    const drawdown = peak === 0 ? 0 : nav / peak - 1;
-    if (drawdown < maxDrawdown) {
-      maxDrawdown = drawdown;
-    }
-  });
-  return maxDrawdown;
-}
-
-function buildPortfolioCurve(histories, basket) {
-  const bySymbol = new Map(
-    histories
-      .filter((item) => item.items?.length)
-      .map((item) => [item.symbol, item.items]),
-  );
-
-  const symbolSet = basket
-    .map((item) => item.symbol)
-    .filter((symbol) => bySymbol.has(symbol));
-
-  if (!symbolSet.length) {
-    return [];
-  }
-
-  const dateIntersection = symbolSet
-    .map((symbol) => new Set(bySymbol.get(symbol).map((point) => point.tradeDate)))
-    .reduce((acc, set) => new Set([...acc].filter((date) => set.has(date))));
-
-  const dates = [...dateIntersection].sort();
-  if (!dates.length) {
-    return [];
-  }
-
-  const weighted = symbolSet.map((symbol) => {
-    const series = bySymbol.get(symbol);
-    const first = Number(series[0]?.close);
-    const weight = basket.find((item) => item.symbol === symbol)?.weight || 0;
-    const byDate = new Map(series.map((point) => [point.tradeDate, Number(point.close)]));
-    return { symbol, first, weight, byDate };
-  });
-
-  return dates.map((date) => {
-    const nav = weighted.reduce((sum, item) => {
-      const close = item.byDate.get(date);
-      if (!Number.isFinite(close) || !Number.isFinite(item.first) || item.first === 0) {
-        return sum;
-      }
-      return sum + item.weight * (close / item.first);
-    }, 0);
-    return { date, nav };
-  });
-}
-
 function mean(values) {
   if (!values.length) {
     return 0;
@@ -847,10 +635,6 @@ export default function AnalysisPage({ meta }) {
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
   const [basket, setBasket] = useState([]);
-  const [windowDays, setWindowDays] = useState(90);
-  const [backtestLoading, setBacktestLoading] = useState(false);
-  const [backtestError, setBacktestError] = useState("");
-  const [backtestResult, setBacktestResult] = useState(null);
   const [simulationSteps, setSimulationSteps] = useState(252);
   const [simulationPaths, setSimulationPaths] = useState(500);
   const [simulationLoading, setSimulationLoading] = useState(false);
@@ -859,7 +643,7 @@ export default function AnalysisPage({ meta }) {
   const [sharpeLoading, setSharpeLoading] = useState(false);
   const [sharpeError, setSharpeError] = useState("");
   const [sharpeResult, setSharpeResult] = useState(null);
-  const [activeSection, setActiveSection] = useState("backtest");
+  const [activeSection, setActiveSection] = useState("simulation");
   const basketSymbolSet = useMemo(
     () => new Set(basket.map((item) => (item.symbol || "").toUpperCase())),
     [basket],
@@ -912,15 +696,9 @@ export default function AnalysisPage({ meta }) {
   }, [basket]);
 
   useEffect(() => {
-    setBacktestResult(null);
     setSimulationResult(null);
     setSharpeResult(null);
   }, [basket]);
-
-  useEffect(() => {
-    setBacktestResult(null);
-    setSharpeResult(null);
-  }, [windowDays]);
 
   useEffect(() => {
     setSimulationResult(null);
@@ -1016,64 +794,6 @@ export default function AnalysisPage({ meta }) {
     return alignedSeries;
   }
 
-  async function runBacktest() {
-    if (!normalizedBasket.length) {
-      return;
-    }
-    setBacktestLoading(true);
-    setBacktestError("");
-    try {
-      const historyList = await Promise.all(
-        normalizedBasket.map(async (item) => {
-          const response = await apiFetch(
-            `/api/assets/price-history?query=${encodeURIComponent(item.symbol)}&days=${windowDays}`,
-          );
-          return { symbol: item.symbol, items: response.items || [] };
-        }),
-      );
-
-      const curve = buildPortfolioCurve(historyList, normalizedBasket);
-      if (!curve.length) {
-        throw new Error("No overlapping history returned for the selected basket.");
-      }
-
-      const totalReturn = Number(curve[curve.length - 1].nav) / Number(curve[0].nav) - 1;
-      const annualizedReturn =
-        curve.length > 1
-          ? (1 + totalReturn) ** (TRADING_DAYS_PER_YEAR / (curve.length - 1)) - 1
-          : totalReturn;
-      const maxDrawdown = computeMaxDrawdown(curve);
-
-      const assetReturns = historyList
-        .map((item) => {
-          const first = Number(item.items[0]?.close);
-          const last = Number(item.items[item.items.length - 1]?.close);
-          if (!Number.isFinite(first) || !Number.isFinite(last) || first === 0) {
-            return null;
-          }
-          return {
-            symbol: item.symbol,
-            totalReturn: last / first - 1,
-          };
-        })
-        .filter(Boolean)
-        .sort((a, b) => Number(b.totalReturn) - Number(a.totalReturn));
-
-      setBacktestResult({
-        curve,
-        totalReturn,
-        annualizedReturn,
-        maxDrawdown,
-        assetReturns,
-      });
-    } catch (error) {
-      setBacktestResult(null);
-      setBacktestError(error.message);
-    } finally {
-      setBacktestLoading(false);
-    }
-  }
-
   async function runWienerSimulation() {
     if (!normalizedBasket.length) {
       return;
@@ -1137,7 +857,7 @@ export default function AnalysisPage({ meta }) {
     setSharpeLoading(true);
     setSharpeError("");
     try {
-      const alignedSeries = await loadAlignedSeries(Math.max(252, windowDays + 30));
+      const alignedSeries = await loadAlignedSeries(252);
       const symbols = alignedSeries.map((item) => item.symbol);
 
       const logReturnSeries = alignedSeries.map((item) => {
@@ -1203,10 +923,6 @@ export default function AnalysisPage({ meta }) {
   }
 
   const stageTabs = [
-    {
-      id: "backtest",
-      label: "Backtest",
-    },
     {
       id: "simulation",
       label: "Simulation",
@@ -1359,94 +1075,6 @@ export default function AnalysisPage({ meta }) {
               </div>
             </div>
 
-            {activeSection === "backtest" ? (
-              <div className="analysis-stage-panel">
-                <div className="card-head">
-                  <span>Backtest</span>
-                  <strong>{windowDays} days</strong>
-                </div>
-
-                <div className="analysis-controls">
-                  <label>
-                    Window
-                    <select
-                      value={windowDays}
-                      onChange={(event) => setWindowDays(Number(event.target.value))}
-                      disabled={!normalizedBasket.length}
-                    >
-                      {BACKTEST_WINDOWS.map((days) => (
-                        <option key={days} value={days}>
-                          {days} days
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="search-button"
-                    onClick={runBacktest}
-                    disabled={!normalizedBasket.length || backtestLoading}
-                  >
-                    {backtestLoading
-                      ? <LoadingInline label="Running..." size="xs" tone="inverted" />
-                      : "Run Backtest"}
-                  </button>
-                </div>
-
-                {backtestError ? <p className="inline-error">{backtestError}</p> : null}
-
-                {backtestResult ? (
-                  <>
-                    <div className="metric-panel">
-                      <div className="metric-panel-primary">
-                        <span className="metric-panel-label">Backtest Result</span>
-                        <strong className={classForDelta(backtestResult.totalReturn)}>
-                          {formatSignedPercent(backtestResult.totalReturn)}
-                        </strong>
-                        <p>Total Return</p>
-                      </div>
-                      <div className="metric-panel-grid">
-                        <div className="metric-panel-item">
-                          <span>Annualized Return</span>
-                          <strong className={classForDelta(backtestResult.annualizedReturn)}>
-                            {formatSignedPercent(backtestResult.annualizedReturn)}
-                          </strong>
-                        </div>
-                        <div className="metric-panel-item">
-                          <span>Max Drawdown</span>
-                          <strong className={classForDelta(backtestResult.maxDrawdown)}>
-                            {formatSignedPercent(backtestResult.maxDrawdown)}
-                          </strong>
-                        </div>
-                        <div className="metric-panel-item">
-                          <span>Last Date</span>
-                          <strong>{formatDate(backtestResult.curve[backtestResult.curve.length - 1]?.date)}</strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <BacktestChart points={backtestResult.curve} />
-
-                    <div className="activity-list">
-                      {(backtestResult.assetReturns || []).slice(0, 5).map((item) => (
-                        <div key={item.symbol} className="activity-item">
-                          <span className="activity-dot" />
-                          <p>
-                            {item.symbol}: {formatSignedPercent(item.totalReturn)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <EmptyState
-                    title="Backtest not run"
-                    description="Click Run Backtest."
-                  />
-                )}
-              </div>
-            ) : null}
-
             {activeSection === "simulation" ? (
               <div className="analysis-stage-panel">
                 <div className="card-head">
@@ -1596,13 +1224,6 @@ export default function AnalysisPage({ meta }) {
                       </div>
                     </div>
 
-                    <EfficientFrontierChart
-                      points={sharpeResult.points}
-                      optimal={sharpeResult.optimal}
-                    />
-
-                    <OptimalWeightsChart weights={sharpeResult.optimal.weights} />
-
                     <div className="analysis-optimal-weights">
                       {sharpeResult.optimal.weights.map((item) => (
                         <div key={item.symbol} className="analysis-optimal-item">
@@ -1611,6 +1232,13 @@ export default function AnalysisPage({ meta }) {
                         </div>
                       ))}
                     </div>
+
+                    <OptimalWeightsChart weights={sharpeResult.optimal.weights} />
+
+                    <EfficientFrontierChart
+                      points={sharpeResult.points}
+                      optimal={sharpeResult.optimal}
+                    />
                   </>
                 ) : (
                   <EmptyState

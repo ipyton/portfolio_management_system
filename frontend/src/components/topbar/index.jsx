@@ -1,11 +1,14 @@
 import React from "react";
+import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
 import LightModeRoundedIcon from "@mui/icons-material/LightModeRounded";
 
-function BrandLockup() {
+function BrandLockup({ theme }) {
+  const logoSrc = theme === "dark" ? "/logo_blank.png" : "/logo.png";
+
   // Keep the logo and brand copy centered on the same vertical axis.
   return (
     <div className="brand-lockup">
-      <img src="/logo.png" alt="HSBC logo" className="brand-logo-image" />
+      <img src={logoSrc} alt="Piggy Bank logo" className="brand-logo-image" />
       <div className="brand-copy">
         <p className="brand-kicker">Portfolio Management System</p>
         <strong className="brand-name">INVEST GLOBALLY</strong>
@@ -71,12 +74,7 @@ function ThemeToggle({ theme, onThemeToggle }) {
       {isDark ? (
         <LightModeRoundedIcon className="theme-icon" fontSize="small" />
       ) : (
-        <img
-          src="/darkmode-icon.png"
-          alt=""
-          className="theme-icon theme-icon-image"
-          aria-hidden="true"
-        />
+        <DarkModeRoundedIcon className="theme-icon" fontSize="small" />
       )}
     </button>
   );
@@ -94,7 +92,7 @@ export default function Topbar({
   // Compose all topbar building blocks in one place.
   return (
     <header className="topbar">
-      <BrandLockup />
+      <BrandLockup theme={theme} />
       <div className="topbar-actions">
         <NavigationLinks
           navItems={navItems}

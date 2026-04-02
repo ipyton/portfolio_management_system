@@ -46,7 +46,7 @@ export default function TradeList({
   const visibleTrades = selectedSymbol ? trades.filter((trade) => trade.symbol === selectedSymbol) : trades;
   const placeholderRows = Array.from({ length: minRows }, (_, index) => `trade-placeholder-${index}`);
   return (
-    <article className="feature-card" style={{ padding: 16 }}>
+    <article className="feature-card trade-list-card" style={{ padding: 16 }}>
       <div className="card-head" style={{ marginBottom: 12 }}>
         <span>{selectedSymbol ? `${selectedSymbol} Trades` : "Recent Trades"}</span>
         {selectedSymbol && <button type="button" className="theme-pill" onClick={onClear}>Clear</button>}
@@ -55,7 +55,7 @@ export default function TradeList({
         {visibleTrades.length === 0 ? (
           <>
             {placeholderRows.map((rowKey) => (
-              <div key={rowKey} className="activity-item" style={{ justifyContent: "space-between" }}>
+              <div key={rowKey} className="activity-item trade-list-item" style={{ justifyContent: "space-between" }}>
                 <p>&nbsp;</p>
                 <p>&nbsp;</p>
               </div>
@@ -76,7 +76,7 @@ export default function TradeList({
             return (
               <div
                 key={trade.id}
-                className="activity-item"
+                className="activity-item trade-list-item"
                 style={{ justifyContent: "space-between", alignItems: "flex-start" }}
               >
                 <div>
