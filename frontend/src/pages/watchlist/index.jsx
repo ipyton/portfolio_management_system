@@ -523,6 +523,9 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       if (requestedInterval === "1day" && candles.length === 0) {
         candles = await fetchCandles(ONE_DAY_FALLBACK_LOOKBACK_DAYS, requestedConfig.interval);
       }
+      if (requestedInterval === "1day" && candles.length === 0) {
+        candles = await fetchCandles(ONE_DAY_FALLBACK_LOOKBACK_DAYS, "1day");
+      }
 
       const validCandles = candles.filter(
         (point) =>
@@ -560,13 +563,16 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   }, [applyHistoryToSymbol, selected?.symbol, candleInterval]);
 
   useEffect(() => {
+    if (candleInterval === "1day") {
+      return;
+    }
     rows.forEach((row) => {
       if (!row?.symbol || row?.priceHistory?.length) {
         return;
       }
       void hydrateHistoryForSymbol(row.symbol);
     });
-  }, [rows, hydrateHistoryForSymbol]);
+  }, [rows, hydrateHistoryForSymbol, candleInterval]);
 
   useEffect(() => {
     const symbol = String(selected?.symbol || "").toUpperCase();

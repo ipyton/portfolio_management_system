@@ -5,7 +5,11 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -36,6 +40,8 @@ public class TwelveDataClient {
     private static final Logger log = LoggerFactory.getLogger(TwelveDataClient.class);
     private static final String TIME_SERIES_PATH = "/time_series";
     private static final String PRICE_PATH = "/price";
+    private static final ZoneId BEIJING_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter TD_DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -121,11 +127,18 @@ public class TwelveDataClient {
                 if (!values.isArray()) {
                     return List.of();
                 }
+                JsonNode meta = root.path("meta");
+                String exchangeTimezone = text(meta, "exchange_timezone");
+                boolean intradayInterval = isIntradayInterval(interval);
 
                 List<AssetCandleHistoryItem> items = new ArrayList<>();
                 for (JsonNode value : values) {
                     String rawDateTime = text(value, "datetime");
-                    LocalDate tradeDate = parseDate(rawDateTime);
+                    String normalizedDateTime = normalizeDateTime(rawDateTime);
+                    String beijingDateTime = intradayInterval
+                            ? toBeijingDateTime(normalizedDateTime, exchangeTimezone)
+                            : normalizedDateTime;
+                    LocalDate tradeDate = parseDate(beijingDateTime);
                     BigDecimal open = decimal(text(value, "open"));
                     BigDecimal high = decimal(text(value, "high"));
                     BigDecimal low = decimal(text(value, "low"));
@@ -138,7 +151,7 @@ public class TwelveDataClient {
                     }
                     items.add(new AssetCandleHistoryItem(
                             tradeDate,
-                            normalizeDateTime(rawDateTime),
+                            beijingDateTime,
                             open,
                             high,
                             low,
@@ -379,6 +392,34 @@ public class TwelveDataClient {
             return null;
         }
         return rawDateTime.trim().replace('T', ' ');
+    }
+
+    private String toBeijingDateTime(String rawDateTime, String sourceTimezone) {
+        if (!StringUtils.hasText(rawDateTime)) {
+            return rawDateTime;
+        }
+        if (!StringUtils.hasText(sourceTimezone)) {
+            return rawDateTime;
+        }
+        String normalized = rawDateTime.trim();
+        if (normalized.length() < 19) {
+            return normalized;
+        }
+        try {
+            LocalDateTime localDateTime = LocalDateTime.parse(normalized.substring(0, 19), TD_DATETIME_FORMATTER);
+            ZonedDateTime sourceTime = localDateTime.atZone(ZoneId.of(sourceTimezone.trim()));
+            ZonedDateTime beijingTime = sourceTime.withZoneSameInstant(BEIJING_ZONE);
+            return beijingTime.format(TD_DATETIME_FORMATTER);
+        } catch (RuntimeException ex) {
+            return normalized;
+        }
+    }
+
+    private boolean isIntradayInterval(String interval) {
+        if (!StringUtils.hasText(interval)) {
+            return false;
+        }
+        return interval.trim().toLowerCase(Locale.ROOT).endsWith("h");
     }
 
     private int resolveOutputSize(String interval, LocalDate startDate, LocalDate endDate) {
