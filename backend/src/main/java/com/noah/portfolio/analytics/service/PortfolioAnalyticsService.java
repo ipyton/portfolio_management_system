@@ -22,6 +22,8 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -40,6 +42,7 @@ import com.noah.portfolio.user.repository.UserRepository;
 @Service
 @Transactional(readOnly = true)
 public class PortfolioAnalyticsService {
+    private static final Logger log = LoggerFactory.getLogger(PortfolioAnalyticsService.class);
 
     private static final double TRADING_DAYS_PER_YEAR = 252.0;
     private static final double EPSILON = 1e-9;
@@ -99,6 +102,7 @@ public class PortfolioAnalyticsService {
         List<CashBalance> cashBalances = fetchCashBalances(userId);
         List<TradeRecord> trades = fetchTrades(userId);
         boolean hasLiveData = !holdings.isEmpty() || !cashBalances.isEmpty() || !trades.isEmpty();
+        boolean hasActiveHoldings = !holdings.isEmpty();
         String reportingCurrency = resolveReportingCurrency(requestedBaseCurrency);
 
         LocalDate startDate = navPoints.isEmpty() ? null : navPoints.get(0).navDate();
@@ -113,15 +117,21 @@ public class PortfolioAnalyticsService {
         double riskFreeRate = fetchRiskFreeRate(resolveRiskFreeCurrency(dominantRegion));
 
         List<ReturnPoint> portfolioReturns = buildPortfolioReturnSeries(navPoints);
-        List<Map<String, Object>> benchmarkComparisons = buildBenchmarkComparisons(
+        List<Map<String, Object>> computedBenchmarkComparisons = buildBenchmarkComparisons(
                 benchmarkSeries,
                 portfolioReturns,
                 riskFreeRate
         );
-        Map<String, Object> primaryBenchmarkMetrics = benchmarkComparisons.stream()
-                .filter(item -> Objects.equals(item.get("symbol"), primaryBenchmarkSymbol))
-                .findFirst()
-                .orElse(benchmarkComparisons.isEmpty() ? null : benchmarkComparisons.get(0));
+        List<Map<String, Object>> benchmarkComparisons = hasActiveHoldings ? computedBenchmarkComparisons : List.of();
+        Map<String, Object> primaryBenchmarkMetrics = hasActiveHoldings
+                ? benchmarkComparisons.stream()
+                        .filter(item -> Objects.equals(item.get("symbol"), primaryBenchmarkSymbol))
+                        .findFirst()
+                        .orElse(benchmarkComparisons.isEmpty() ? null : benchmarkComparisons.get(0))
+                : null;
+        Map<String, Object> benchmarkChart = hasActiveHoldings
+                ? buildBenchmarkChart(navPoints, benchmarkSeries, primaryBenchmarkSymbol)
+                : emptyBenchmarkChart(primaryBenchmarkSymbol, benchmarkSeries);
 
         double totalCash = resolveCashTotal(cashBalances, reportingCurrency);
         double totalAvailableFunds = resolveAvailableFunds(cashBalances, reportingCurrency);
@@ -133,8 +143,20 @@ public class PortfolioAnalyticsService {
         response.put("userId", userId);
         response.put("hasData", !navPoints.isEmpty() || !holdings.isEmpty() || !cashBalances.isEmpty() || !trades.isEmpty());
         response.put("asOf", asOfDate != null ? asOfDate.toString() : LocalDate.now().toString());
-        response.put("performance", buildPerformanceSection(navPoints, portfolioReturns, benchmarkComparisons, hasLiveData));
-        response.put("risk", buildRiskSection(navPoints, portfolioReturns, primaryBenchmarkMetrics, riskFreeRate));
+        response.put("performance", buildPerformanceSection(
+                navPoints,
+                portfolioReturns,
+                benchmarkComparisons,
+                benchmarkChart,
+                hasLiveData
+        ));
+        response.put("risk", buildRiskSection(
+                navPoints,
+                portfolioReturns,
+                primaryBenchmarkMetrics,
+                riskFreeRate,
+                hasActiveHoldings
+        ));
         response.put("holdings", buildHoldingsSection(holdings, cashBalances, totalHoldingMarketValue, totalPortfolioValue, reportingCurrency));
         response.put("trading", buildTradingSection(trades, navPoints, totalPortfolioValue, reportingCurrency));
         response.put("news", resolveDashboardNews(primaryBenchmarkSymbol, dominantRegion));
@@ -169,8 +191,12 @@ public class PortfolioAnalyticsService {
         if (lastRebuildAt != null && Duration.between(lastRebuildAt, now).compareTo(NAV_REBUILD_TTL) < 0) {
             return;
         }
-        portfolioNavSnapshotService.buildSnapshotForUser(userId);
-        navRebuildAtByUser.put(userId, now);
+        try {
+            portfolioNavSnapshotService.buildSnapshotForUser(userId);
+            navRebuildAtByUser.put(userId, now);
+        } catch (RuntimeException ex) {
+            log.warn("Failed to auto rebuild dashboard NAV snapshot for user {}. Proceeding with existing data.", userId, ex);
+        }
     }
 
     private List<Map<String, Object>> resolveDashboardNews(String benchmarkSymbol, String dominantRegion) {
@@ -231,6 +257,7 @@ public class PortfolioAnalyticsService {
             List<NavPoint> navPoints,
             List<ReturnPoint> portfolioReturns,
             List<Map<String, Object>> benchmarkComparisons,
+            Map<String, Object> benchmarkChart,
             boolean hasLiveData
     ) {
         LinkedHashMap<String, Object> performance = new LinkedHashMap<>();
@@ -238,7 +265,8 @@ public class PortfolioAnalyticsService {
             performance.put("totalReturn", null);
             performance.put("annualizedReturn", null);
             performance.put("timeWeightedReturn", null);
-            performance.put("benchmarkComparisons", benchmarkComparisons);
+            performance.put("benchmarkComparisons", List.of());
+            performance.put("benchmarkChart", benchmarkChart);
             return performance;
         }
         double totalReturn = computeTotalReturn(navPoints);
@@ -249,16 +277,106 @@ public class PortfolioAnalyticsService {
         performance.put("annualizedReturn", annualizedReturn == null ? null : round(annualizedReturn));
         performance.put("timeWeightedReturn", timeWeightedReturn == null ? null : round(timeWeightedReturn));
         performance.put("benchmarkComparisons", benchmarkComparisons);
+        performance.put("benchmarkChart", benchmarkChart);
         return performance;
+    }
+
+    private Map<String, Object> buildBenchmarkChart(
+            List<NavPoint> navPoints,
+            Map<String, List<BenchmarkPricePoint>> benchmarkSeries,
+            String primaryBenchmarkSymbol
+    ) {
+        if (!StringUtils.hasText(primaryBenchmarkSymbol)) {
+            return emptyBenchmarkChart(null, benchmarkSeries);
+        }
+
+        List<BenchmarkPricePoint> prices = benchmarkSeries.getOrDefault(primaryBenchmarkSymbol, List.of()).stream()
+                .sorted(Comparator.comparing(BenchmarkPricePoint::tradeDate))
+                .toList();
+        if (prices.size() < 2 || navPoints.isEmpty()) {
+            return emptyBenchmarkChart(primaryBenchmarkSymbol, benchmarkSeries);
+        }
+
+        Map<LocalDate, NavPoint> navByDate = navPoints.stream()
+                .collect(Collectors.toMap(NavPoint::navDate, nav -> nav, (left, right) -> right));
+        List<Map<String, Object>> points = new ArrayList<>();
+        Double basePortfolio = null;
+        Double baseBenchmark = null;
+
+        for (BenchmarkPricePoint benchmarkPoint : prices) {
+            NavPoint nav = navByDate.get(benchmarkPoint.tradeDate());
+            if (nav == null) {
+                continue;
+            }
+            double portfolioValue = nav.netValue() > EPSILON ? nav.netValue() : nav.totalValue();
+            if (portfolioValue <= EPSILON || benchmarkPoint.closePrice() <= EPSILON) {
+                continue;
+            }
+
+            if (basePortfolio == null || baseBenchmark == null) {
+                basePortfolio = portfolioValue;
+                baseBenchmark = benchmarkPoint.closePrice();
+            }
+
+            points.add(orderedMap(
+                    "date", benchmarkPoint.tradeDate().toString(),
+                    "portfolio", round((portfolioValue / basePortfolio) * 100.0),
+                    "benchmark", round((benchmarkPoint.closePrice() / baseBenchmark) * 100.0)
+            ));
+        }
+
+        if (points.size() < 2) {
+            return emptyBenchmarkChart(primaryBenchmarkSymbol, benchmarkSeries);
+        }
+
+        BenchmarkPricePoint first = prices.get(0);
+        return orderedMap(
+                "symbol", first.symbol(),
+                "name", first.name(),
+                "region", first.region(),
+                "points", points
+        );
+    }
+
+    private Map<String, Object> emptyBenchmarkChart(
+            String primaryBenchmarkSymbol,
+            Map<String, List<BenchmarkPricePoint>> benchmarkSeries
+    ) {
+        BenchmarkPricePoint first = null;
+        if (StringUtils.hasText(primaryBenchmarkSymbol)) {
+            List<BenchmarkPricePoint> prices = benchmarkSeries.get(primaryBenchmarkSymbol);
+            if (prices != null && !prices.isEmpty()) {
+                first = prices.get(0);
+            }
+        }
+        return orderedMap(
+                "symbol", first == null ? primaryBenchmarkSymbol : first.symbol(),
+                "name", first == null ? null : first.name(),
+                "region", first == null ? null : first.region(),
+                "points", List.of()
+        );
     }
 
     private Map<String, Object> buildRiskSection(
             List<NavPoint> navPoints,
             List<ReturnPoint> portfolioReturns,
             Map<String, Object> primaryBenchmarkMetrics,
-            double riskFreeRate
+            double riskFreeRate,
+            boolean hasActiveHoldings
     ) {
         LinkedHashMap<String, Object> risk = new LinkedHashMap<>();
+        if (!hasActiveHoldings) {
+            risk.put("annualizedVolatility", null);
+            risk.put("maxDrawdown", null);
+            risk.put("sharpeRatio", null);
+            risk.put("riskFreeRate", null);
+            risk.put("beta", null);
+            risk.put("alpha", null);
+            risk.put("benchmarkSymbol", null);
+            risk.put("benchmarkName", null);
+            return risk;
+        }
+
         Double annualizedVolatility = computeAnnualizedVolatility(portfolioReturns);
         Double annualizedReturn = computeAnnualizedReturn(navPoints);
         Double sharpeRatio = annualizedVolatility == null || annualizedReturn == null || almostZero(annualizedVolatility)
@@ -1104,7 +1222,13 @@ public class PortfolioAnalyticsService {
                 "totalReturn", null,
                 "annualizedReturn", null,
                 "timeWeightedReturn", null,
-                "benchmarkComparisons", List.of()
+                "benchmarkComparisons", List.of(),
+                "benchmarkChart", orderedMap(
+                        "symbol", null,
+                        "name", null,
+                        "region", null,
+                        "points", List.of()
+                )
         ));
         response.put("risk", orderedMap(
                 "annualizedVolatility", null,

@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.noah.portfolio.analytics.entity.PortfolioNavDailyEntity;
@@ -80,7 +81,7 @@ public class PortfolioNavSnapshotService {
         log.info("Portfolio NAV snapshots refreshed. navDate={}, reportingCurrency={}, userCount={}", navDate, reportingCurrency, updated);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void buildSnapshotForUser(Long userId) {
         if (userId == null) {
             return;

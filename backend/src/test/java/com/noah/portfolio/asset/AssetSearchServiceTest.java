@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
@@ -22,6 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.noah.portfolio.asset.client.EastmoneyClient;
 import com.noah.portfolio.asset.client.FinnhubClient;
+import com.noah.portfolio.asset.client.YahooFinanceClient;
 import com.noah.portfolio.asset.config.FinnhubProperties;
 import com.noah.portfolio.asset.client.TwelveDataClient;
 import com.noah.portfolio.asset.dto.AssetCandidate;
@@ -77,6 +80,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -133,6 +137,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -176,6 +181,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -208,6 +214,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 finnhubClient,
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -243,6 +250,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -269,6 +277,7 @@ class AssetSearchServiceTest {
                 mock(AssetRepository.class),
                 mock(AssetPriceDailyRepository.class),
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                mock(YahooFinanceClient.class),
                 mock(TwelveDataClient.class),
                 mock(EastmoneyClient.class)
         );
@@ -286,11 +295,12 @@ class AssetSearchServiceTest {
         AssetPriceDailyRepository priceRepository = mock(AssetPriceDailyRepository.class);
         TwelveDataClient twelveDataClient = mock(TwelveDataClient.class);
         EastmoneyClient eastmoneyClient = mock(EastmoneyClient.class);
+        YahooFinanceClient yahooFinanceClient = mock(YahooFinanceClient.class);
 
         AssetEntity cachedAsset = asset(5001L, "SPX", AssetType.INDEX, "SPX", "USD", "INDEX", "US", true);
         when(assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc("SPX")).thenReturn(Optional.empty());
         when(assetRepository.findMaxId()).thenReturn(5000L);
-        when(assetRepository.save(any(AssetEntity.class))).thenReturn(cachedAsset);
+        when(assetRepository.saveAndFlush(any(AssetEntity.class))).thenReturn(cachedAsset);
 
         when(eastmoneyClient.supportsSymbol("SPX")).thenReturn(false);
         when(twelveDataClient.fetchDailyHistory(any(), any(), any())).thenReturn(List.of(
@@ -310,6 +320,7 @@ class AssetSearchServiceTest {
                 assetRepository,
                 priceRepository,
                 new StubFinnhubClient(Optional.empty(), Optional.empty(), List.of()),
+                yahooFinanceClient,
                 twelveDataClient,
                 eastmoneyClient
         );
@@ -318,6 +329,54 @@ class AssetSearchServiceTest {
 
         assertThat(response.source()).isEqualTo("DATABASE");
         assertThat(response.count()).isGreaterThanOrEqualTo(1);
+        verify(yahooFinanceClient, never()).fetchDailyHistory(any(), any(), any());
+    }
+
+    @Test
+    void priceHistoryFallsBackToFinnhubAfterYahooWhenTwelveDataReturnsEmpty() {
+        StubAssetSearchDataRepository repository = new StubAssetSearchDataRepository(List.of(), Map.of());
+        AssetRepository assetRepository = mock(AssetRepository.class);
+        AssetPriceDailyRepository priceRepository = mock(AssetPriceDailyRepository.class);
+        TwelveDataClient twelveDataClient = mock(TwelveDataClient.class);
+        FinnhubClient finnhubClient = mock(FinnhubClient.class);
+        EastmoneyClient eastmoneyClient = mock(EastmoneyClient.class);
+        YahooFinanceClient yahooFinanceClient = mock(YahooFinanceClient.class);
+
+        AssetEntity cachedAsset = asset(5001L, "SPX", AssetType.INDEX, "SPX", "USD", "INDEX", "US", true);
+        when(assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc("SPX")).thenReturn(Optional.of(cachedAsset));
+
+        when(eastmoneyClient.supportsSymbol("SPX")).thenReturn(false);
+        when(twelveDataClient.fetchDailyHistory(any(), any(), any())).thenReturn(List.of());
+        when(yahooFinanceClient.fetchDailyHistory(any(), any(), any())).thenReturn(List.of());
+        when(finnhubClient.fetchDailyHistory(any(), any(), any())).thenReturn(List.of(
+                new AssetPriceHistoryItem(LocalDate.of(2026, 3, 28), new BigDecimal("5700.11")),
+                new AssetPriceHistoryItem(LocalDate.of(2026, 3, 31), new BigDecimal("5758.32"))
+        ));
+
+        when(priceRepository.findTradeDates(anyLong(), any(), any())).thenReturn(List.of());
+        when(priceRepository.countOhlcColumns()).thenReturn(0L);
+        when(priceRepository.findPriceHistory(anyLong(), any(), any())).thenReturn(List.of(
+                new AssetPriceHistoryPoint(5001L, new BigDecimal("5700.11"), LocalDate.of(2026, 3, 28)),
+                new AssetPriceHistoryPoint(5001L, new BigDecimal("5758.32"), LocalDate.of(2026, 3, 31))
+        ));
+
+        AssetSearchService service = new AssetSearchService(
+                repository,
+                assetRepository,
+                priceRepository,
+                finnhubClient,
+                yahooFinanceClient,
+                twelveDataClient,
+                eastmoneyClient
+        );
+
+        AssetPriceHistoryResponse response = service.priceHistory("SPX", 30);
+
+        assertThat(response.source()).isEqualTo("DATABASE");
+        assertThat(response.count()).isGreaterThanOrEqualTo(1);
+        verify(twelveDataClient).fetchDailyHistory(any(), any(), any());
+        verify(yahooFinanceClient).fetchDailyHistory(any(), any(), any());
+        verify(finnhubClient).fetchDailyHistory(any(), any(), any());
     }
 
     private AssetEntity asset(

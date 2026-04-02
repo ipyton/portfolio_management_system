@@ -10,8 +10,10 @@ import com.noah.portfolio.asset.service.*;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -23,6 +25,17 @@ public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
 
     @Query("select coalesce(max(a.id), 0) from AssetEntity a")
     Long findMaxId();
+
+    @Modifying
+    @Query("""
+            update AssetEntity a
+            set a.lastPriceRefreshedAt = :refreshedAt
+            where a.id = :assetId
+            """)
+    int touchLastPriceRefreshedAt(
+            @Param("assetId") Long assetId,
+            @Param("refreshedAt") Instant refreshedAt
+    );
 
     @Query("""
             select distinct a
@@ -42,4 +55,18 @@ public interface AssetRepository extends JpaRepository<AssetEntity, Long> {
             a.symbol asc
             """)
     List<AssetEntity> searchStocks(@Param("keyword") String keyword);
+
+    @Query("""
+            select a
+            from AssetEntity a
+            where a.assetType = com.noah.portfolio.asset.model.AssetType.INDEX
+                and a.benchmark = true
+            order by
+                case when a.region is null then 1 else 0 end,
+                a.region asc,
+                a.symbol asc
+            """)
+    List<AssetEntity> findBenchmarkIndices();
+
+    List<AssetEntity> findAllByAssetTypeOrderBySymbolAsc(AssetType assetType);
 }

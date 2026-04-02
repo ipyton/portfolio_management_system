@@ -40,5 +40,6 @@ class PortfolioSimulationServiceTest {
 
         assertThat(terminal).isCloseTo(expectedTerminal, within(1e-6));
         assertThat(response.stats().expectedReturn()).isCloseTo(0.5, within(1e-6));
+        assertThat(response.warnings()).anyMatch(item -> item.contains("Student-t"));
     }
 }

@@ -96,6 +96,7 @@
 - planner_done
 - tools_done
 - answer_started
+- answer_delta（回答文本增量）
 - answer_done
 - done
 

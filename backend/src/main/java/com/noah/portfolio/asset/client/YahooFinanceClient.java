@@ -10,9 +10,15 @@ import com.noah.portfolio.asset.service.*;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.net.URI;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -34,7 +40,31 @@ public class YahooFinanceClient {
     private static final String SEARCH_PATH = "/v1/finance/search";
     private static final String QUOTE_PATH = "/v7/finance/quote";
     private static final String QUOTE_SUMMARY_PATH = "/v10/finance/quoteSummary/{symbol}";
+    private static final String CHART_PATH = "/v8/finance/chart/{symbol}";
     private static final String QUOTE_SUMMARY_MODULES = "price,summaryProfile,summaryDetail,defaultKeyStatistics,financialData,fundProfile";
+    private static final Map<String, String> HISTORY_SYMBOL_ALIASES = Map.ofEntries(
+            Map.entry("SPX", "^GSPC"),
+            Map.entry("IXIC", "^IXIC"),
+            Map.entry("DJI", "^DJI"),
+            Map.entry("RUT", "^RUT"),
+            Map.entry("VIX", "^VIX"),
+            Map.entry("FTSE", "^FTSE"),
+            Map.entry("GDAXI", "^GDAXI"),
+            Map.entry("FCHI", "^FCHI"),
+            Map.entry("N225", "^N225"),
+            Map.entry("HSI", "^HSI"),
+            Map.entry("000300.SH", "000300.SS"),
+            Map.entry("SSEC", "000001.SS"),
+            Map.entry("000001.SH", "000001.SS"),
+            Map.entry("BSESN", "^BSESN"),
+            Map.entry("NSEI", "^NSEI"),
+            Map.entry("AXJO", "^AXJO"),
+            Map.entry("KS11", "^KS11"),
+            Map.entry("TSX", "^GSPTSE"),
+            Map.entry("STI", "^STI"),
+            Map.entry("TWII", "^TWII"),
+            Map.entry("IBOV", "^BVSP")
+    );
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -135,6 +165,64 @@ public class YahooFinanceClient {
         } catch (IOException | RestClientException ex) {
             throw new YahooFinanceLookupException("Failed to fetch Yahoo Finance quote price for symbol: " + symbol, ex);
         }
+    }
+
+    public List<AssetPriceHistoryItem> fetchDailyHistory(String symbol, LocalDate startDate, LocalDate endDate) {
+        if (!properties.isEnabled() || !StringUtils.hasText(symbol)) {
+            return List.of();
+        }
+        String normalizedSymbol = normalizeHistorySymbol(symbol);
+
+        try {
+            JsonNode root = getJson(uriBuilder -> uriBuilder
+                    .path(CHART_PATH)
+                    .queryParam("interval", "1d")
+                    .queryParam("period1", startDate.atStartOfDay().toEpochSecond(ZoneOffset.UTC))
+                    .queryParam("period2", endDate.plusDays(1).atStartOfDay().minusSeconds(1).toEpochSecond(ZoneOffset.UTC))
+                    .build(normalizedSymbol));
+
+            JsonNode result = firstArrayElement(root.path("chart").path("result"));
+            if (isMissing(result)) {
+                return List.of();
+            }
+
+            JsonNode timestamps = result.path("timestamp");
+            JsonNode quote = firstArrayElement(result.path("indicators").path("quote"));
+            JsonNode closes = isMissing(quote) ? null : quote.path("close");
+            if (!timestamps.isArray() || !closes.isArray()) {
+                return List.of();
+            }
+
+            int size = Math.min(timestamps.size(), closes.size());
+            List<AssetPriceHistoryItem> items = new ArrayList<>(size);
+            for (int i = 0; i < size; i += 1) {
+                JsonNode timeNode = timestamps.get(i);
+                JsonNode closeNode = closes.get(i);
+                if (isMissing(timeNode) || isMissing(closeNode) || !timeNode.isNumber() || !closeNode.isNumber()) {
+                    continue;
+                }
+
+                LocalDate tradeDate = Instant.ofEpochSecond(timeNode.longValue()).atZone(ZoneOffset.UTC).toLocalDate();
+                if (tradeDate.isBefore(startDate) || tradeDate.isAfter(endDate)) {
+                    continue;
+                }
+                items.add(new AssetPriceHistoryItem(tradeDate, closeNode.decimalValue()));
+            }
+            return items;
+        } catch (IOException | RestClientException ex) {
+            throw new YahooFinanceLookupException(
+                    "Failed to fetch Yahoo Finance history for symbol: " + symbol + " (resolved as " + normalizedSymbol + ")",
+                    ex
+            );
+        }
+    }
+
+    private String normalizeHistorySymbol(String symbol) {
+        String normalized = symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+        if (!StringUtils.hasText(normalized)) {
+            return symbol;
+        }
+        return HISTORY_SYMBOL_ALIASES.getOrDefault(normalized, normalized);
     }
 
     Optional<YahooFinanceDetail> buildDetail(String symbol, JsonNode quoteRoot, JsonNode summaryRoot) {

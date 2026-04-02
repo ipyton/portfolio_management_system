@@ -8,6 +8,8 @@ import com.noah.portfolio.asset.model.*;
 import com.noah.portfolio.asset.repository.*;
 import com.noah.portfolio.asset.service.*;
 
+import java.time.Instant;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -45,6 +47,9 @@ public class AssetEntity {
 
     @Column(name = "is_benchmark", nullable = false)
     private boolean benchmark;
+
+    @Column(name = "last_price_refreshed_at")
+    private Instant lastPriceRefreshedAt;
 
     @OneToOne(mappedBy = "asset", fetch = FetchType.LAZY)
     private AssetStockDetailEntity stockDetail;
@@ -117,6 +122,10 @@ public class AssetEntity {
 
     public boolean isBenchmark() {
         return benchmark;
+    }
+
+    public Instant getLastPriceRefreshedAt() {
+        return lastPriceRefreshedAt;
     }
 
     public AssetStockDetailEntity getStockDetail() {

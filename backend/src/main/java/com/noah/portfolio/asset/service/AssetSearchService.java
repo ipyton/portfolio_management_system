@@ -9,6 +9,7 @@ import com.noah.portfolio.asset.model.*;
 import com.noah.portfolio.asset.repository.*;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,6 +20,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -40,6 +45,7 @@ public class AssetSearchService {
     private static final int MAX_RECOMMENDATION_LIMIT = 12;
     private static final int DEFAULT_RECOMMENDATION_LOOKBACK_DAYS = 180;
     private static final int MIN_RECOMMENDATION_LOOKBACK_DAYS = 30;
+    private static final int MAX_ASSET_CREATE_RETRIES = 8;
     private static final Set<String> KNOWN_INDEX_SYMBOLS = Set.of(
             "SPX", "IXIC", "DJI", "FTSE", "GDAXI", "FCHI", "N225", "HSI", "SSEC", "BSESN", "NSEI", "AXJO", "KS11", "TSX", "000300.SH"
     );
@@ -48,14 +54,18 @@ public class AssetSearchService {
     private final AssetRepository assetRepository;
     private final AssetPriceDailyRepository assetPriceDailyRepository;
     private final FinnhubClient finnhubClient;
+    private final YahooFinanceClient yahooFinanceClient;
     private final TwelveDataClient twelveDataClient;
     private final EastmoneyClient eastmoneyClient;
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public AssetSearchService(
             AssetSearchDataRepository assetSearchDataRepository,
             AssetRepository assetRepository,
             AssetPriceDailyRepository assetPriceDailyRepository,
             FinnhubClient finnhubClient,
+            YahooFinanceClient yahooFinanceClient,
             TwelveDataClient twelveDataClient,
             EastmoneyClient eastmoneyClient
     ) {
@@ -63,6 +73,7 @@ public class AssetSearchService {
         this.assetRepository = assetRepository;
         this.assetPriceDailyRepository = assetPriceDailyRepository;
         this.finnhubClient = finnhubClient;
+        this.yahooFinanceClient = yahooFinanceClient;
         this.twelveDataClient = twelveDataClient;
         this.eastmoneyClient = eastmoneyClient;
     }
@@ -143,6 +154,35 @@ public class AssetSearchService {
                 databaseMatches.stream().map(this::toCandidate).toList(),
                 warnings
         );
+    }
+
+    public AssetWorldIndicesResponse worldIndices() {
+        List<AssetEntity> indices = assetRepository.findBenchmarkIndices();
+        if (indices.isEmpty()) {
+            indices = assetRepository.findAllByAssetTypeOrderBySymbolAsc(AssetType.INDEX);
+        }
+
+        Map<Long, AssetPriceWindowSnapshot> latestWindows = assetSearchDataRepository.findLatestPriceWindows(
+                indices.stream().map(AssetEntity::getId).toList()
+        );
+
+        List<AssetWorldIndexItem> items = indices.stream()
+                .map(asset -> {
+                    AssetPriceWindowSnapshot latest = latestWindows.get(asset.getId());
+                    return new AssetWorldIndexItem(
+                            asset.getSymbol(),
+                            asset.getName(),
+                            asset.getRegion(),
+                            asset.getExchange(),
+                            asset.getCurrency(),
+                            latest == null ? null : latest.latestTradeDate(),
+                            latest == null ? null : latest.latestClose(),
+                            latest == null ? null : latest.previousClose(),
+                            asset.getLastPriceRefreshedAt()
+                    );
+                })
+                .toList();
+        return new AssetWorldIndicesResponse(items.size(), items);
     }
 
     public AssetSuggestionResponse suggest(String query, Integer limit) {
@@ -289,12 +329,18 @@ public class AssetSearchService {
     @Transactional
     public AssetPriceHistoryResponse priceHistory(String query, Integer days) {
         String normalizedQuery = normalizeQuery(query);
+        String normalizedLookupQuery = normalizeHistoryLookupQuery(normalizedQuery);
         int historyDays = normalizeHistoryDays(days);
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(historyDays - 1L);
 
         List<String> warnings = new ArrayList<>();
-        AssetEntity localAsset = resolveLocalAsset(normalizedQuery);
+        if (!normalizedLookupQuery.equalsIgnoreCase(normalizedQuery)) {
+            warnings.add("Symbol " + normalizedQuery.toUpperCase(Locale.ROOT)
+                    + " is mapped to " + normalizedLookupQuery.toUpperCase(Locale.ROOT) + ".");
+        }
+
+        AssetEntity localAsset = resolveLocalAsset(normalizedLookupQuery);
         List<AssetPriceHistoryItem> localItems = List.of();
         if (localAsset != null) {
             localItems = assetPriceDailyRepository.findPriceHistory(
@@ -308,12 +354,13 @@ public class AssetSearchService {
 
         String resolvedSymbol = localAsset != null && StringUtils.hasText(localAsset.getSymbol())
                 ? localAsset.getSymbol().toUpperCase(Locale.ROOT)
-                : normalizedQuery.toUpperCase(Locale.ROOT);
+                : normalizedLookupQuery.toUpperCase(Locale.ROOT);
 
         boolean needsRefresh = localAsset != null && historyNeedsRefresh(localItems, endDate);
         if (needsRefresh) {
             RemoteHistory remote = fetchRemoteHistory(resolvedSymbol, startDate, endDate, warnings);
             cacheRemoteHistory(localAsset, remote.items(), startDate, endDate);
+            markAssetRefreshTime(localAsset, remote.items());
             localItems = assetPriceDailyRepository.findPriceHistory(
                             localAsset.getId(),
                             startDate,
@@ -324,13 +371,13 @@ public class AssetSearchService {
         }
 
         if (localAsset != null && !localItems.isEmpty()) {
-            return new AssetPriceHistoryResponse(
-                    normalizedQuery,
-                    localAsset.getSymbol(),
-                    "DATABASE",
-                    localItems.size(),
-                    localItems,
-                    warnings
+                return new AssetPriceHistoryResponse(
+                        normalizedQuery,
+                        localAsset.getSymbol(),
+                        "DATABASE",
+                        localItems.size(),
+                        localItems,
+                        warnings
             );
         }
 
@@ -341,6 +388,7 @@ public class AssetSearchService {
         RemoteHistory remote = fetchRemoteHistory(resolvedSymbol, startDate, endDate, warnings);
         AssetEntity cacheAsset = resolveOrCreateCacheAsset(localAsset, resolvedSymbol, remote.items());
         cacheRemoteHistory(cacheAsset, remote.items(), startDate, endDate);
+        markAssetRefreshTime(cacheAsset, remote.items());
 
         if (cacheAsset != null && !remote.items().isEmpty()) {
             List<AssetPriceHistoryItem> cachedItems = assetPriceDailyRepository.findPriceHistory(
@@ -497,7 +545,25 @@ public class AssetSearchService {
                 return asset;
             }
         }
+        // For symbol-like queries, avoid fuzzy fallback to unrelated assets.
+        if (looksLikeSymbol(query)) {
+            return null;
+        }
         return matches.get(0);
+    }
+
+    private String normalizeHistoryLookupQuery(String query) {
+        String upper = query.trim().toUpperCase(Locale.ROOT);
+        if ("SSEC".equals(upper) || "000001.SS".equals(upper) || "SHCOMP".equals(upper) || "SH000001".equals(upper)) {
+            return "000001.SH";
+        }
+        return upper;
+    }
+
+    private boolean looksLikeSymbol(String query) {
+        String upper = query.trim().toUpperCase(Locale.ROOT);
+        return upper.startsWith("^")
+                || upper.matches("^[A-Z0-9]{1,12}(\\.[A-Z0-9]{1,6})?$");
     }
 
     private int normalizeRecommendationLimit(Integer limit) {
@@ -745,20 +811,60 @@ public class AssetSearchService {
             LocalDate endDate,
             List<String> warnings
     ) {
-        if (eastmoneyClient.supportsSymbol(symbol)) {
+        List<RemoteHistoryProvider> providers = buildRemoteHistoryProviders(symbol, startDate, endDate);
+        if (providers.isEmpty()) {
+            warnings.add("No remote history providers are available.");
+            return new RemoteHistory("UNAVAILABLE", List.of());
+        }
+
+        for (RemoteHistoryProvider provider : providers) {
             try {
-                return new RemoteHistory("EASTMONEY", eastmoneyClient.fetchDailyHistory(symbol, startDate, endDate));
-            } catch (EastmoneyClient.EastmoneyLookupException ex) {
-                warnings.add("Failed to load price history from Eastmoney: " + sanitizeWarningMessage(ex.getMessage()));
-                return new RemoteHistory("EASTMONEY", List.of());
+                List<AssetPriceHistoryItem> items = provider.fetcher().get();
+                if (items != null && !items.isEmpty()) {
+                    return new RemoteHistory(provider.source(), items);
+                }
+            } catch (RuntimeException ex) {
+                warnings.add("Failed to load price history from " + provider.displayName()
+                        + ": " + sanitizeWarningMessage(ex.getMessage()));
             }
         }
-        try {
-            return new RemoteHistory("TWELVE_DATA", twelveDataClient.fetchDailyHistory(symbol, startDate, endDate));
-        } catch (TwelveDataClient.TwelveDataLookupException ex) {
-            warnings.add("Failed to load price history from Twelve Data: " + sanitizeWarningMessage(ex.getMessage()));
-            return new RemoteHistory("TWELVE_DATA", List.of());
+
+        warnings.add("No remote price history returned for symbol " + symbol.toUpperCase(Locale.ROOT)
+                + " after trying " + providers.stream().map(RemoteHistoryProvider::displayName).toList() + ".");
+        return new RemoteHistory(providers.get(0).source(), List.of());
+    }
+
+    private List<RemoteHistoryProvider> buildRemoteHistoryProviders(
+            String symbol,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        List<RemoteHistoryProvider> providers = new ArrayList<>(3);
+        if (eastmoneyClient.supportsSymbol(symbol)) {
+            providers.add(new RemoteHistoryProvider(
+                    "EASTMONEY",
+                    "Eastmoney",
+                    () -> eastmoneyClient.fetchDailyHistory(symbol, startDate, endDate)
+            ));
+        } else {
+            providers.add(new RemoteHistoryProvider(
+                    "TWELVE_DATA",
+                    "Twelve Data",
+                    () -> twelveDataClient.fetchDailyHistory(symbol, startDate, endDate)
+            ));
         }
+
+        providers.add(new RemoteHistoryProvider(
+                "YAHOO_FINANCE",
+                "Yahoo Finance",
+                () -> yahooFinanceClient.fetchDailyHistory(symbol, startDate, endDate)
+        ));
+        providers.add(new RemoteHistoryProvider(
+                "FINNHUB",
+                "Finnhub",
+                () -> finnhubClient.fetchDailyHistory(symbol, startDate, endDate)
+        ));
+        return providers;
     }
 
     private AssetEntity resolveOrCreateCacheAsset(AssetEntity localAsset, String symbol, List<AssetPriceHistoryItem> remoteItems) {
@@ -780,22 +886,33 @@ public class AssetSearchService {
 
     private AssetEntity createCacheAsset(String symbol) {
         AssetType assetType = inferAssetType(symbol);
-        long nextId = Math.max(assetRepository.findMaxId() == null ? 0L : assetRepository.findMaxId(), 0L) + 1L;
-        AssetEntity entity = new AssetEntity(
-                nextId,
-                symbol,
-                assetType,
-                symbol,
-                inferCurrency(symbol),
-                inferExchange(symbol),
-                inferRegion(symbol),
-                assetType == AssetType.INDEX
-        );
-        try {
-            return assetRepository.save(entity);
-        } catch (DataIntegrityViolationException ex) {
-            return assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc(symbol).orElse(null);
+        for (int attempt = 1; attempt <= MAX_ASSET_CREATE_RETRIES; attempt += 1) {
+            long maxId = Math.max(assetRepository.findMaxId() == null ? 0L : assetRepository.findMaxId(), 0L);
+            long nextId = maxId + 1L;
+            AssetEntity entity = new AssetEntity(
+                    nextId,
+                    symbol,
+                    assetType,
+                    symbol,
+                    inferCurrency(symbol),
+                    inferExchange(symbol),
+                    inferRegion(symbol),
+                    assetType == AssetType.INDEX
+            );
+            try {
+                return assetRepository.saveAndFlush(entity);
+            } catch (DataIntegrityViolationException ex) {
+                entityManager.clear();
+                AssetEntity existing = assetRepository.findFirstBySymbolIgnoreCaseOrderByIdAsc(symbol).orElse(null);
+                if (existing != null) {
+                    return existing;
+                }
+                if (attempt == MAX_ASSET_CREATE_RETRIES) {
+                    throw ex;
+                }
+            }
         }
+        return null;
     }
 
     private AssetType inferAssetType(String symbol) {
@@ -933,14 +1050,24 @@ public class AssetSearchService {
             return;
         }
 
-        List<AssetPriceDailyEntity> entities = toInsert.stream()
-                .map(item -> new AssetPriceDailyEntity(asset, item.tradeDate(), item.close()))
-                .toList();
-        try {
-            assetPriceDailyRepository.saveAll(entities);
-        } catch (DataIntegrityViolationException ignored) {
-            // Best-effort cache write: unique-date races should not fail the response path.
+        for (AssetPriceHistoryItem item : toInsert) {
+            try {
+                assetPriceDailyRepository.insertPriceCloseOnly(
+                        asset.getId(),
+                        item.tradeDate(),
+                        item.close()
+                );
+            } catch (DataIntegrityViolationException ignored) {
+                // Best-effort cache write: unique-date races should not fail the response path.
+            }
         }
+    }
+
+    private void markAssetRefreshTime(AssetEntity asset, List<AssetPriceHistoryItem> remoteItems) {
+        if (asset == null || remoteItems == null || remoteItems.isEmpty()) {
+            return;
+        }
+        assetRepository.touchLastPriceRefreshedAt(asset.getId(), Instant.now());
     }
 
     @SafeVarargs
@@ -1060,5 +1187,12 @@ public class AssetSearchService {
     }
 
     private record RemoteHistory(String source, List<AssetPriceHistoryItem> items) {
+    }
+
+    private record RemoteHistoryProvider(
+            String source,
+            String displayName,
+            Supplier<List<AssetPriceHistoryItem>> fetcher
+    ) {
     }
 }

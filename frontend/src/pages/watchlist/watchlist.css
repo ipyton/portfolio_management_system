@@ -99,10 +99,12 @@
 .watchlist-page .watchlist-tabs button {
   border: none;
   background: #ffffff;
+  color: #111827;
   padding: 6px 12px;
   border-radius: 6px;
   font-weight: 600;
   cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .watchlist-page .watchlist-tabs .caret {
@@ -140,11 +142,13 @@
 .watchlist-page .ranking-menu button {
   border: none;
   background: transparent;
+  color: #111827;
   text-align: left;
   font-weight: 600;
   padding: 6px 8px;
   border-radius: 8px;
   cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .watchlist-page .ranking-menu button.active {
@@ -266,9 +270,15 @@
 
 .watchlist-page .stats-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   color: #1f2937;
   font-weight: 600;
+}
+
+.watchlist-page .stat {
+  color: inherit;
+  line-height: 1.45;
 }
 
 .watchlist-page .action-row {
@@ -301,6 +311,7 @@
   background: transparent;
   border: none;
   padding: 0;
+  line-height: 1;
 }
 
 .watchlist-page .action-row .icon-btn:disabled {
@@ -318,29 +329,92 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 24, 39, 0.35);
+  padding: 16px;
+  background:
+    radial-gradient(circle at 20% 8%, rgba(79, 123, 255, 0.16), transparent 42%),
+    radial-gradient(circle at 88% 92%, rgba(42, 165, 248, 0.14), transparent 36%),
+    rgba(17, 24, 39, 0.46);
+  backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
   z-index: 200;
 }
 
 .modal-card {
-  width: min(360px, 90vw);
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 24px 50px rgba(17, 24, 39, 0.2);
+  width: min(440px, 92vw);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  border: 1px solid rgba(106, 123, 162, 0.26);
+  border-radius: 20px;
+  padding: 22px 22px 20px;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
   display: grid;
+  gap: 14px;
+  animation: modal-in 180ms ease-out both;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.trade-modal {
   gap: 12px;
+}
+
+.confirmation-modal {
+  width: min(360px, 90vw);
+  text-align: center;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .modal-card h3 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
+  color: #111827;
+}
+
+.modal-side-pill {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trade-modal.is-buy .modal-side-pill {
+  background: rgba(22, 163, 74, 0.14);
+  color: #15803d;
+}
+
+.trade-modal.is-sell .modal-side-pill {
+  background: rgba(220, 38, 38, 0.14);
+  color: #b91c1c;
+}
+
+.modal-symbol {
+  margin: -2px 0 2px;
+  font-size: 0.9rem;
+  color: #64748b;
+  font-weight: 600;
 }
 
 .modal-warning {
-  background: #fee2e2;
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  background: rgba(254, 226, 226, 0.9);
   color: #b91c1c;
   padding: 10px 12px;
   border-radius: 10px;
@@ -349,6 +423,10 @@
 
 .modal-cash {
   margin: 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  background: rgba(241, 245, 249, 0.85);
   font-weight: 600;
   color: #374151;
 }
@@ -362,28 +440,76 @@
   margin: 0;
   font-weight: 600;
   color: #111827;
+  line-height: 1.55;
 }
 
-.modal-card input {
-  border: 2px solid #111111;
+.modal-input {
+  width: 100%;
+  border: 1.5px solid #c5cfdf;
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 1rem;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: rgba(79, 123, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(79, 123, 255, 0.16);
+}
+
+.modal-input:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .modal-actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
+  margin-top: 4px;
 }
 
-.modal-actions button {
-  border: none;
-  background: #4b5563;
-  color: #ffffff;
-  padding: 8px 18px;
+.modal-btn {
+  border: 1px solid transparent;
+  padding: 9px 16px;
   border-radius: 10px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  transition: transform 130ms ease, filter 130ms ease, border-color 130ms ease;
+}
+
+.modal-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.modal-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.modal-btn-secondary {
+  border-color: rgba(148, 163, 184, 0.46);
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+}
+
+.modal-btn-secondary:hover:not(:disabled) {
+  filter: brightness(0.98);
+}
+
+.modal-btn-primary {
+  border-color: rgba(79, 123, 255, 0.55);
+  background: linear-gradient(180deg, rgba(79, 123, 255, 0.96), rgba(57, 89, 207, 0.95));
+  color: #f8fbff;
+}
+
+.modal-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
 :root:not([data-theme="light"]) .watchlist-page.watchlist-shell {
@@ -394,6 +520,7 @@
 :root:not([data-theme="light"]) .watchlist-page .watchlist-title,
 :root:not([data-theme="light"]) .watchlist-page .watchlist-search input,
 :root:not([data-theme="light"]) .watchlist-page .ticker,
+:root:not([data-theme="light"]) .watchlist-page .modal-card h3,
 :root:not([data-theme="light"]) .watchlist-page .modal-label,
 :root:not([data-theme="light"]) .watchlist-page .modal-confirmation {
   color: var(--text);
@@ -405,8 +532,15 @@
 :root:not([data-theme="light"]) .watchlist-page .ranking-menu,
 :root:not([data-theme="light"]) .watchlist-page .chart-placeholder,
 :root:not([data-theme="light"]) .watchlist-page .modal-card {
-  background: rgba(17, 21, 29, 0.92);
+  background: linear-gradient(180deg, rgba(17, 21, 29, 0.96), rgba(12, 15, 22, 0.96));
   border-color: rgba(121, 168, 255, 0.18);
+}
+
+:root:not([data-theme="light"]) .modal-overlay {
+  background:
+    radial-gradient(circle at 20% 8%, rgba(79, 123, 255, 0.2), transparent 42%),
+    radial-gradient(circle at 88% 92%, rgba(42, 165, 248, 0.14), transparent 36%),
+    rgba(3, 6, 13, 0.72);
 }
 
 :root:not([data-theme="light"]) .watchlist-page .watchlist-panel,
@@ -422,9 +556,99 @@
   background: rgba(79, 123, 255, 0.12);
 }
 
+:root:not([data-theme="light"]) .watchlist-page .watchlist-tabs button,
+:root:not([data-theme="light"]) .watchlist-page .watchlist-tabs .ranking-button,
+:root:not([data-theme="light"]) .watchlist-page .ranking-menu button {
+  background: rgba(30, 38, 54, 0.92);
+  color: var(--text);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .watchlist-tabs button:hover,
+:root:not([data-theme="light"]) .watchlist-page .ranking-menu button:hover {
+  background: rgba(79, 123, 255, 0.16);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .action-row button,
+:root:not([data-theme="light"]) .watchlist-page .ranking-actions button,
+:root:not([data-theme="light"]) .watchlist-page .modal-btn-primary {
+  background: linear-gradient(180deg, rgba(79, 123, 255, 0.92), rgba(57, 89, 207, 0.95));
+  color: #f8fbff;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .action-row button:hover:not(:disabled),
+:root:not([data-theme="light"]) .watchlist-page .ranking-actions button:hover,
+:root:not([data-theme="light"]) .watchlist-page .modal-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .action-row button:disabled,
+:root:not([data-theme="light"]) .watchlist-page .modal-btn:disabled {
+  opacity: 0.45;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .action-row .icon-btn,
+:root:not([data-theme="light"]) .watchlist-page .action-row .icon-btn:hover:not(:disabled) {
+  background: transparent;
+  filter: none;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .watchlist-tabs button:focus-visible,
+:root:not([data-theme="light"]) .watchlist-page .ranking-menu button:focus-visible,
+:root:not([data-theme="light"]) .watchlist-page .action-row button:focus-visible,
+:root:not([data-theme="light"]) .watchlist-page .modal-btn:focus-visible {
+  outline: 2px solid rgba(121, 168, 255, 0.72);
+  outline-offset: 2px;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-symbol {
+  color: var(--muted);
+}
+
 :root:not([data-theme="light"]) .watchlist-page .metric,
 :root:not([data-theme="light"]) .watchlist-page .modal-cash {
   color: var(--muted);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .stats-grid,
+:root:not([data-theme="light"]) .watchlist-page .stats-grid .stat {
+  color: var(--text);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-cash {
+  border-color: rgba(121, 168, 255, 0.22);
+  background: rgba(16, 21, 32, 0.9);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-input {
+  background: rgba(10, 14, 24, 0.9);
+  border-color: rgba(121, 168, 255, 0.28);
+  color: var(--text);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-input:focus {
+  border-color: rgba(121, 168, 255, 0.75);
+  box-shadow: 0 0 0 3px rgba(121, 168, 255, 0.18);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-input:disabled {
+  background: rgba(18, 23, 34, 0.86);
+  color: #6f7b94;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .modal-btn-secondary {
+  border-color: rgba(121, 168, 255, 0.26);
+  background: rgba(17, 21, 29, 0.9);
+  color: var(--text);
+}
+
+:root:not([data-theme="light"]) .watchlist-page .trade-modal.is-buy .modal-side-pill {
+  background: rgba(72, 187, 120, 0.2);
+  color: #92e5ad;
+}
+
+:root:not([data-theme="light"]) .watchlist-page .trade-modal.is-sell .modal-side-pill {
+  background: rgba(248, 113, 113, 0.2);
+  color: #ffb4b4;
 }
 
 @media (max-width: 1080px) {
@@ -442,5 +666,22 @@
 
   .watchlist-page .watchlist-search {
     min-width: 100%;
+  }
+
+  .watchlist-page .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-card {
+    padding: 18px 16px 16px;
+  }
+
+  .modal-actions {
+    justify-content: stretch;
+  }
+
+  .modal-btn {
+    flex: 1;
+    text-align: center;
   }
 }

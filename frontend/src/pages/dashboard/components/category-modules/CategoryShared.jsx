@@ -21,6 +21,8 @@ export function MetricCards({ metrics, accent }) {
 }
 
 export function BenchmarkChart({ primary, secondary, labels }) {
+  const safePrimary = Array.isArray(primary) ? primary : [];
+  const safeSecondary = Array.isArray(secondary) ? secondary : [];
   const [tooltip, setTooltip] = useState(null);
   const svgRef = useRef(null);
   const W = 760;
@@ -28,12 +30,16 @@ export function BenchmarkChart({ primary, secondary, labels }) {
   const PAD = { top: 18, right: 18, bottom: 34, left: 48 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
-  const n = Math.max(primary.length, secondary.length);
+  const n = Math.max(safePrimary.length, safeSecondary.length);
+  const hasChartData = n >= 2 && safePrimary.length === n && safeSecondary.length === n;
+  if (!hasChartData) {
+    return <p className="benchmark-chart-empty">No benchmark time series available.</p>;
+  }
   const xLabels =
     labels && labels.length === n
       ? labels
       : Array.from({ length: n }, (_, i) => `P${i + 1}`);
-  const allVals = [...primary, ...secondary];
+  const allVals = [...safePrimary, ...safeSecondary];
   const minV = Math.min(...allVals) - 1;
   const maxV = Math.max(...allVals) + 1;
   const xOf = (i) => PAD.left + (i / Math.max(n - 1, 1)) * innerW;
@@ -72,8 +78,8 @@ export function BenchmarkChart({ primary, secondary, labels }) {
     setTooltip({
       i: nearest,
       label: xLabels[nearest],
-      portfolio: primary[nearest],
-      benchmark: secondary[nearest],
+      portfolio: safePrimary[nearest],
+      benchmark: safeSecondary[nearest],
     });
   };
 
@@ -112,10 +118,10 @@ export function BenchmarkChart({ primary, secondary, labels }) {
           </text>
         ))}
 
-        <path d={toArea(secondary)} fill="url(#dash-gb)" />
-        <path d={toArea(primary)} fill="url(#dash-gp)" />
-        <path d={toPath(secondary)} fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="5 4" />
-        <path d={toPath(primary)} fill="none" stroke="#4f7bff" strokeWidth="2.6" />
+        <path d={toArea(safeSecondary)} fill="url(#dash-gb)" />
+        <path d={toArea(safePrimary)} fill="url(#dash-gp)" />
+        <path d={toPath(safeSecondary)} fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="5 4" />
+        <path d={toPath(safePrimary)} fill="none" stroke="#4f7bff" strokeWidth="2.6" />
 
         {tooltip && (
           <g>

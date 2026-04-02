@@ -11,6 +11,8 @@ export default function MetricsSlider({
   sparkPoints,
   benchPoints,
   benchmarkPoints,
+  benchmarkLabels,
+  benchmarkMeta,
   donutSegments,
 }) {
   return (
@@ -87,6 +89,8 @@ export default function MetricsSlider({
               sparkPoints={sparkPoints}
               benchPoints={benchPoints}
               benchmarkPoints={benchmarkPoints}
+              benchmarkLabels={benchmarkLabels}
+              benchmarkMeta={benchmarkMeta}
               donutSegments={donutSegments}
             />
           </div>

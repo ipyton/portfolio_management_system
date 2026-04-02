@@ -1,6 +1,7 @@
 package com.noah.portfolio.asset.client;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -12,6 +13,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriBuilder;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,6 +35,7 @@ import com.noah.portfolio.asset.dto.YahooFinanceSearchResult;
 @Component
 public class FinnhubClient {
 
+    private static final Logger log = LoggerFactory.getLogger(FinnhubClient.class);
     private static final String SEARCH_PATH = "/api/v1/search";
     private static final String QUOTE_PATH = "/api/v1/quote";
     private static final String PROFILE_PATH = "/api/v1/stock/profile2";
@@ -42,6 +47,9 @@ public class FinnhubClient {
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final FinnhubProperties properties;
+    private final Object candleAccessLock = new Object();
+    private Instant candleHistoryDisabledUntil = Instant.EPOCH;
+    private Instant lastCandleSkipWarnAt = Instant.EPOCH;
 
     public FinnhubClient(
             RestClient.Builder restClientBuilder,
@@ -176,6 +184,9 @@ public class FinnhubClient {
         if (!isAvailable()) {
             return List.of();
         }
+        if (isCandleHistoryTemporarilyDisabled(symbol)) {
+            return List.of();
+        }
         try {
             JsonNode root = getJson(uriBuilder -> uriBuilder
                     .path(CANDLE_PATH)
@@ -185,6 +196,12 @@ public class FinnhubClient {
                     .queryParam("to", endDate.plusDays(1).atStartOfDay().minusSeconds(1).toEpochSecond(ZoneOffset.UTC))
                     .queryParam("token", properties.getApiKey())
                     .build());
+
+            String error = text(root, "error");
+            if (StringUtils.hasText(error)) {
+                handleCandleError(symbol, error);
+                return List.of();
+            }
 
             if (!"ok".equalsIgnoreCase(text(root, "s"))) {
                 return List.of();
@@ -208,9 +225,106 @@ public class FinnhubClient {
                 items.add(new AssetPriceHistoryItem(tradeDate, closeNode.decimalValue()));
             }
             return items;
+        } catch (RestClientResponseException ex) {
+            if (handleCandleHttpStatusError(symbol, ex)) {
+                return List.of();
+            }
+            throw new FinnhubLookupException("Failed to fetch Finnhub history for symbol: " + symbol, ex);
         } catch (IOException | RestClientException ex) {
             throw new FinnhubLookupException("Failed to fetch Finnhub history for symbol: " + symbol, ex);
         }
+    }
+
+    private boolean isCandleHistoryTemporarilyDisabled(String symbol) {
+        Instant now = Instant.now();
+        synchronized (candleAccessLock) {
+            if (!now.isBefore(candleHistoryDisabledUntil)) {
+                return false;
+            }
+            if (Duration.between(lastCandleSkipWarnAt, now).compareTo(Duration.ofSeconds(15)) >= 0) {
+                lastCandleSkipWarnAt = now;
+                log.warn(
+                        "Finnhub candle access temporarily disabled until {}. Skipping history request for symbol {}.",
+                        candleHistoryDisabledUntil,
+                        symbol
+                );
+            }
+            return true;
+        }
+    }
+
+    private void handleCandleError(String symbol, String errorMessage) {
+        String normalized = errorMessage.toLowerCase(Locale.ROOT);
+        Instant now = Instant.now();
+        Duration disableDuration = null;
+        if (normalized.contains("don't have access")
+                || normalized.contains("do not have access")
+                || normalized.contains("forbidden")
+                || normalized.contains("permission")) {
+            disableDuration = Duration.ofHours(1);
+        } else if (normalized.contains("rate limit") || normalized.contains("too many requests")) {
+            disableDuration = Duration.ofMinutes(1);
+        }
+
+        if (disableDuration != null) {
+            synchronized (candleAccessLock) {
+                Instant nextUntil = now.plus(disableDuration);
+                if (nextUntil.isAfter(candleHistoryDisabledUntil)) {
+                    candleHistoryDisabledUntil = nextUntil;
+                }
+                lastCandleSkipWarnAt = now;
+            }
+            log.warn(
+                    "Finnhub candle history unavailable for symbol {}. Disabled until {}. Error: {}",
+                    symbol,
+                    candleHistoryDisabledUntil,
+                    errorMessage
+            );
+            return;
+        }
+
+        log.warn("Finnhub candle history returned error for symbol {}: {}", symbol, errorMessage);
+    }
+
+    private boolean handleCandleHttpStatusError(String symbol, RestClientResponseException ex) {
+        int statusCode = ex.getStatusCode().value();
+        String message = StringUtils.hasText(ex.getResponseBodyAsString())
+                ? ex.getResponseBodyAsString()
+                : ex.getMessage();
+        if (statusCode == 401 || statusCode == 403) {
+            synchronized (candleAccessLock) {
+                Instant nextUntil = Instant.now().plus(Duration.ofHours(1));
+                if (nextUntil.isAfter(candleHistoryDisabledUntil)) {
+                    candleHistoryDisabledUntil = nextUntil;
+                }
+                lastCandleSkipWarnAt = Instant.now();
+            }
+            log.warn(
+                    "Finnhub candle history unauthorized for symbol {}. Disabled until {}. status={}, body={}",
+                    symbol,
+                    candleHistoryDisabledUntil,
+                    statusCode,
+                    message
+            );
+            return true;
+        }
+        if (statusCode == 429) {
+            synchronized (candleAccessLock) {
+                Instant nextUntil = Instant.now().plus(Duration.ofMinutes(1));
+                if (nextUntil.isAfter(candleHistoryDisabledUntil)) {
+                    candleHistoryDisabledUntil = nextUntil;
+                }
+                lastCandleSkipWarnAt = Instant.now();
+            }
+            log.warn(
+                    "Finnhub candle history rate-limited for symbol {}. Disabled until {}. body={}",
+                    symbol,
+                    candleHistoryDisabledUntil,
+                    message
+            );
+            return true;
+        }
+        return false;
     }
 
     public List<NewsHeadline> fetchGeneralNews(String category, int limit) {

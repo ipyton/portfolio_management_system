@@ -1,0 +1,323 @@
+.cash-page {
+  display: grid;
+  gap: 18px;
+}
+
+.cash-hero-panel {
+  gap: 14px;
+  padding: 28px 30px;
+}
+
+.cash-hero-headline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cash-hero-headline-row h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+  letter-spacing: -0.02em;
+}
+
+.cash-hero-copy {
+  margin-top: 0;
+  max-width: 68ch;
+}
+
+.cash-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.cash-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border: 1px solid rgba(71, 85, 105, 0.28);
+  background: rgba(14, 116, 144, 0.08);
+  color: var(--text);
+}
+
+.cash-status-pill.loading {
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.cash-status-time {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.cash-refresh-btn {
+  border: 1px solid rgba(79, 123, 255, 0.38);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cash-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.cash-message-card {
+  padding: 16px 18px;
+}
+
+.cash-message {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.cash-message.error {
+  color: #ef4444;
+}
+
+.cash-message.success {
+  color: #16a34a;
+}
+
+.cash-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.cash-left-col {
+  display: grid;
+  gap: 16px;
+}
+
+.cash-transfer-card,
+.cash-balance-card,
+.cash-history-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+}
+
+.cash-transfer-card h2,
+.cash-balance-card h2,
+.cash-history-card h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  letter-spacing: 0.01em;
+}
+
+.cash-transfer-form {
+  display: grid;
+  gap: 8px;
+}
+
+.cash-transfer-form label {
+  font-size: 0.77rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cash-transfer-form select,
+.cash-transfer-form input,
+.cash-transfer-form textarea,
+.cash-history-head select {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  border-radius: 11px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--text);
+  font: inherit;
+}
+
+.cash-transfer-form textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.cash-transfer-form button {
+  margin-top: 4px;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-weight: 800;
+  color: #ffffff;
+  cursor: pointer;
+  background: linear-gradient(140deg, #1d4ed8, #0891b2);
+}
+
+.cash-transfer-form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.cash-balance-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cash-balance-item {
+  border: 1px solid rgba(107, 114, 128, 0.18);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(2, 6, 23, 0.03);
+}
+
+.cash-balance-item header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cash-balance-item header strong {
+  font-size: 1rem;
+}
+
+.cash-balance-item header span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.cash-balance-item p,
+.cash-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.cash-history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.cash-history-head label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cash-history-head select {
+  min-width: 140px;
+}
+
+.cash-table-wrap {
+  overflow: auto;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  border-radius: 14px;
+}
+
+.cash-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.cash-table th,
+.cash-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(100, 116, 139, 0.18);
+  font-size: 0.83rem;
+  vertical-align: top;
+}
+
+.cash-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.cash-type-pill {
+  display: inline-block;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+}
+
+.cash-type-pill.deposit {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.24);
+}
+
+.cash-type-pill.withdraw {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+:root[data-theme="light"] .cash-transfer-form select,
+:root[data-theme="light"] .cash-transfer-form input,
+:root[data-theme="light"] .cash-transfer-form textarea,
+:root[data-theme="light"] .cash-history-head select,
+:root[data-theme="light"] .cash-balance-item {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .cash-table th {
+  background: #0f172a;
+}
+
+@media (max-width: 1080px) {
+  .cash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cash-left-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .cash-hero-panel {
+    padding: 22px 18px;
+  }
+
+  .cash-hero-headline-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cash-left-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cash-history-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cash-history-head label,
+  .cash-history-head select {
+    width: 100%;
+  }
+}

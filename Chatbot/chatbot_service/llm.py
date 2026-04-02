@@ -1,6 +1,11 @@
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.schema import SystemMessage, HumanMessage
+
+try:
+    from langchain_core.messages import SystemMessage, HumanMessage
+except Exception:  # pragma: no cover - compatibility fallback
+    from langchain.schema import SystemMessage, HumanMessage
+
 from .config import settings
 
 
@@ -40,6 +45,30 @@ def _safe_dict(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _extract_chunk_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            else:
+                text = getattr(item, "text", None)
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+    return ""
+
+
 def get_llm(model_name: str | None = None, temperature: float = 0.2):
     return ChatGoogleGenerativeAI(
         model=model_name or settings.gemini_model,
@@ -49,43 +78,55 @@ def get_llm(model_name: str | None = None, temperature: float = 0.2):
     )
 
 
-def call_planner(system_prompt: str, user_prompt: str) -> dict:
+def _build_messages(system_prompt: str, user_prompt: str, runtime_system_prompt: str = ""):
+    merged_system_prompt = system_prompt
+    runtime_prompt = (runtime_system_prompt or "").strip()
+    if runtime_prompt:
+        merged_system_prompt = (
+            f"{system_prompt}\n\n"
+            "Application-level system guidance below. "
+            "Follow it unless it conflicts with higher-priority safety constraints.\n"
+            f"{runtime_prompt}"
+        )
+    messages = [SystemMessage(content=merged_system_prompt)]
+    messages.append(HumanMessage(content=user_prompt))
+    return messages
+
+
+def call_planner(system_prompt: str, user_prompt: str, runtime_system_prompt: str = "") -> dict:
     llm = get_llm(temperature=0)
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+    messages = _build_messages(system_prompt, user_prompt, runtime_system_prompt)
     result = llm.invoke(messages)
-    try:
-        parsed = _extract_json(result.content)
-        return {
-            "need_database": _safe_bool(parsed.get("need_database", False)),
-            "need_web_search": _safe_bool(parsed.get("need_web_search", False)),
-            "need_twelvedata_search": _safe_bool(parsed.get("need_twelvedata_search", False)),
-            "database_query_type": _safe_str(parsed.get("database_query_type", "")),
-            "database_query_params": _safe_dict(parsed.get("database_query_params", {})),
-            "web_search_query": _safe_str(parsed.get("web_search_query", "")),
-            "twelvedata_query": _safe_str(parsed.get("twelvedata_query", "")),
-            "twelvedata_path": _safe_str(parsed.get("twelvedata_path", "")),
-            "analysis_goal": _safe_str(parsed.get("analysis_goal", "")),
-            "need_chart": _safe_bool(parsed.get("need_chart", False)),
-            "chart_type": _safe_str(parsed.get("chart_type", "")),
-        }
-    except json.JSONDecodeError:
-        return {
-            "need_database": False,
-            "need_web_search": False,
-            "need_twelvedata_search": False,
-            "database_query_type": "",
-            "database_query_params": {},
-            "web_search_query": "",
-            "twelvedata_query": "",
-            "twelvedata_path": "",
-            "analysis_goal": "",
-            "need_chart": False,
-            "chart_type": "",
-        }
+    parsed = _extract_json(result.content)
+    return {
+        "need_database": _safe_bool(parsed.get("need_database", False)),
+        "need_web_search": _safe_bool(parsed.get("need_web_search", False)),
+        "need_twelvedata_search": _safe_bool(parsed.get("need_twelvedata_search", False)),
+        "database_query_type": _safe_str(parsed.get("database_query_type", "")),
+        "database_query_params": _safe_dict(parsed.get("database_query_params", {})),
+        "web_search_query": _safe_str(parsed.get("web_search_query", "")),
+        "twelvedata_query": _safe_str(parsed.get("twelvedata_query", "")),
+        "twelvedata_path": _safe_str(parsed.get("twelvedata_path", "")),
+        "analysis_goal": _safe_str(parsed.get("analysis_goal", "")),
+        "need_chart": _safe_bool(parsed.get("need_chart", False)),
+        "chart_type": _safe_str(parsed.get("chart_type", "")),
+    }
 
 
-def call_answer(system_prompt: str, user_prompt: str) -> str:
-    llm = get_llm(temperature=0.2)
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+def call_answer(system_prompt: str, user_prompt: str, runtime_system_prompt: str = "") -> str:
+    llm = get_llm(temperature=0)
+    messages = _build_messages(system_prompt, user_prompt, runtime_system_prompt)
     result = llm.invoke(messages)
     return result.content
+
+
+def call_answer_stream(system_prompt: str, user_prompt: str, runtime_system_prompt: str = ""):
+    llm = get_llm(temperature=0)
+    messages = _build_messages(system_prompt, user_prompt, runtime_system_prompt)
+    for chunk in llm.stream(messages):
+        text = _extract_chunk_text(getattr(chunk, "content", ""))
+        if not text:
+            text_attr = getattr(chunk, "text", "")
+            text = text_attr if isinstance(text_attr, str) else _safe_str(text_attr, "")
+        if text:
+            yield text

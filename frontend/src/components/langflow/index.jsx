@@ -22,22 +22,19 @@ import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import SmartToyRoundedIcon from "@mui/icons-material/SmartToyRounded";
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as echarts from "echarts";
 
-const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_MINIMAX_API_URL || "";
-const apiKey = import.meta.env.VITE_MINIMAX_API_KEY || "";
-const modelName = import.meta.env.VITE_MINIMAX_MODEL || "MiniMax-M2.5";
-const systemPrompt = import.meta.env.VITE_MINIMAX_SYSTEM_PROMPT || "";
+const apiUrl = import.meta.env.VITE_CHATBOT_API_URL || import.meta.env.VITE_API_URL || "";
+const chatUserId = Number.parseInt(import.meta.env.VITE_CHATBOT_USER_ID || "1", 10);
+const systemPrompt = import.meta.env.VITE_CHATBOT_SYSTEM_PROMPT || "你是专业投研助手。";
 const widgetTitle = "PiggyBank AI Assistant";
 
-// Define the number historical chatting messages should be considered.
-const OFFSET = 1;
-
-function createMessage(role, content = "", images = []) {
+function createMessage(role, content = "", images = [], graphOption = null) {
   const uid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
-  return { id: uid, role, content, images };
+  return { id: uid, role, content, images, graphOption };
 }
 
 function sanitizeAssistantText(input) {
@@ -56,85 +53,394 @@ function sanitizeAssistantText(input) {
   return withoutThinkingLines.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function parseContent(content) {
-  const images = [];
-  let text = "";
-
-  const pushImage = (candidate) => {
-    if (typeof candidate !== "string") return;
-    const value = candidate.trim();
-    if (!value) return;
-    images.push(value);
-  };
-
-  const pushText = (candidate) => {
-    if (typeof candidate === "string") text += candidate;
-  };
-
-  const handleNode = (item) => {
-    if (typeof item === "string") {
-      pushText(item);
-      return;
-    }
-    if (!item || typeof item !== "object") return;
-
-    if (item.type === "image_url") {
-      pushImage(item.image_url?.url || item.image_url || item.url);
-      return;
-    }
-    if (item.type === "image") {
-      pushImage(item.url || item.image_url?.url || item.image_url);
-      return;
-    }
-    if (typeof item.text === "string") {
-      pushText(item.text);
-      return;
-    }
-    if (typeof item.content === "string") {
-      pushText(item.content);
-      return;
-    }
-    if (item.image_url) {
-      pushImage(item.image_url?.url || item.image_url);
-    }
-  };
-
-  if (Array.isArray(content)) {
-    content.forEach(handleNode);
-  } else if (typeof content === "string") {
-    pushText(content);
-  } else if (content && typeof content === "object") {
-    handleNode(content);
+function parseJsonSafe(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-
-  return { text, images };
 }
 
-function extractAssistantDelta(payload) {
-  if (!payload || typeof payload !== "object") {
-    return { text: "", images: [], statusCode: null, statusMsg: "" };
-  }
-
-  const statusCode = payload?.base_resp?.status_code ?? null;
-  const statusMsg = payload?.base_resp?.status_msg || "";
-
-  const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
-  const deltaContent = parseContent(choice?.delta?.content);
-  if (deltaContent.text || deltaContent.images.length > 0) {
-    return { ...deltaContent, statusCode, statusMsg };
-  }
-
-  const messageContent = parseContent(choice?.message?.content);
-  if (messageContent.text || messageContent.images.length > 0) {
-    return { ...messageContent, statusCode, statusMsg };
-  }
-
-  return { ...parseContent(payload?.output_text || payload?.text || ""), statusCode, statusMsg };
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export default function LangflowWidget() {
+function mapMaybeArray(value, mapper) {
+  if (Array.isArray(value)) {
+    return value.map((item) => mapper(item));
+  }
+  return mapper(value);
+}
+
+function buildChartPalette(isDarkMode) {
+  if (isDarkMode) {
+    return {
+      text: "#eaf0ff",
+      muted: "#a6b2cd",
+      axisLine: "rgba(140, 158, 194, 0.62)",
+      splitLine: "rgba(121, 168, 255, 0.22)",
+      tooltipBg: "rgba(10, 13, 20, 0.96)",
+      tooltipBorder: "rgba(121, 168, 255, 0.34)",
+      series: ["#79a8ff", "#7bd88f", "#38bdf8", "#f59e0b", "#fb7185", "#c084fc", "#22d3ee"],
+    };
+  }
+
+  return {
+    text: "#1f2937",
+    muted: "#4b5563",
+    axisLine: "rgba(107, 114, 128, 0.55)",
+    splitLine: "rgba(148, 163, 184, 0.28)",
+    tooltipBg: "rgba(255, 255, 255, 0.97)",
+    tooltipBorder: "rgba(148, 163, 184, 0.4)",
+    series: ["#4f7bff", "#16a34a", "#0284c7", "#d97706", "#e11d48", "#7c3aed", "#0f766e"],
+  };
+}
+
+function parseColorToken(colorToken) {
+  if (typeof colorToken !== "string") return null;
+  const token = colorToken.trim().toLowerCase();
+  if (!token) return null;
+  if (token === "black") {
+    return { r: 0, g: 0, b: 0, a: 1 };
+  }
+
+  const hexMatch = token.match(/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    if (hex.length === 3 || hex.length === 4) {
+      const r = Number.parseInt(`${hex[0]}${hex[0]}`, 16);
+      const g = Number.parseInt(`${hex[1]}${hex[1]}`, 16);
+      const b = Number.parseInt(`${hex[2]}${hex[2]}`, 16);
+      const a = hex.length === 4 ? Number.parseInt(`${hex[3]}${hex[3]}`, 16) / 255 : 1;
+      return { r, g, b, a };
+    }
+    const r = Number.parseInt(hex.slice(0, 2), 16);
+    const g = Number.parseInt(hex.slice(2, 4), 16);
+    const b = Number.parseInt(hex.slice(4, 6), 16);
+    const a = hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1;
+    return { r, g, b, a };
+  }
+
+  const rgbMatch = token.match(/^rgba?\(([^)]+)\)$/);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(",").map((part) => part.trim());
+    if (parts.length < 3) return null;
+    const r = Number.parseFloat(parts[0]);
+    const g = Number.parseFloat(parts[1]);
+    const b = Number.parseFloat(parts[2]);
+    const a = parts.length >= 4 ? Number.parseFloat(parts[3]) : 1;
+    if (![r, g, b, a].every(Number.isFinite)) return null;
+    return { r, g, b, a };
+  }
+
+  return null;
+}
+
+function isTooDarkColor(colorToken) {
+  const parsed = parseColorToken(colorToken);
+  if (!parsed) return false;
+  if (parsed.a <= 0.05) return false;
+  const luminance = 0.2126 * parsed.r + 0.7152 * parsed.g + 0.0722 * parsed.b;
+  return luminance < 70;
+}
+
+function pickReadableColor(rawColor, fallbackColor, isDarkMode) {
+  if (!isDarkMode) return rawColor;
+  if (typeof rawColor !== "string" || !rawColor.trim()) return fallbackColor;
+  return isTooDarkColor(rawColor) ? fallbackColor : rawColor;
+}
+
+function applyColorListTheme(colors, palette, isDarkMode) {
+  if (!Array.isArray(colors) || colors.length === 0) {
+    return palette.series;
+  }
+  return colors.map((item, index) =>
+    pickReadableColor(item, palette.series[index % palette.series.length], isDarkMode),
+  );
+}
+
+function applyAxisTheme(axisOption, palette) {
+  return mapMaybeArray(axisOption, (axisItem) => {
+    if (!isPlainObject(axisItem)) return axisItem;
+
+    const axisLine = isPlainObject(axisItem.axisLine) ? axisItem.axisLine : {};
+    const axisTick = isPlainObject(axisItem.axisTick) ? axisItem.axisTick : {};
+    const splitLine = isPlainObject(axisItem.splitLine) ? axisItem.splitLine : {};
+
+    return {
+      ...axisItem,
+      axisLabel: {
+        ...(isPlainObject(axisItem.axisLabel) ? axisItem.axisLabel : {}),
+        color: palette.muted,
+      },
+      nameTextStyle: {
+        ...(isPlainObject(axisItem.nameTextStyle) ? axisItem.nameTextStyle : {}),
+        color: palette.text,
+      },
+      axisLine: {
+        ...axisLine,
+        lineStyle: {
+          ...(isPlainObject(axisLine.lineStyle) ? axisLine.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      axisTick: {
+        ...axisTick,
+        lineStyle: {
+          ...(isPlainObject(axisTick.lineStyle) ? axisTick.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      splitLine: {
+        ...splitLine,
+        lineStyle: {
+          ...(isPlainObject(splitLine.lineStyle) ? splitLine.lineStyle : {}),
+          color: palette.splitLine,
+        },
+      },
+    };
+  });
+}
+
+function applyLegendTheme(legendOption, palette) {
+  return mapMaybeArray(legendOption, (legendItem) => {
+    if (!isPlainObject(legendItem)) return legendItem;
+    return {
+      ...legendItem,
+      textStyle: {
+        ...(isPlainObject(legendItem.textStyle) ? legendItem.textStyle : {}),
+        color: palette.text,
+      },
+      inactiveColor: palette.muted,
+    };
+  });
+}
+
+function applyTitleTheme(titleOption, palette) {
+  return mapMaybeArray(titleOption, (titleItem) => {
+    if (!isPlainObject(titleItem)) return titleItem;
+    return {
+      ...titleItem,
+      textStyle: {
+        ...(isPlainObject(titleItem.textStyle) ? titleItem.textStyle : {}),
+        color: palette.text,
+      },
+      subtextStyle: {
+        ...(isPlainObject(titleItem.subtextStyle) ? titleItem.subtextStyle : {}),
+        color: palette.muted,
+      },
+    };
+  });
+}
+
+function applySeriesDataTheme(dataOption, palette, isDarkMode, seriesIndex) {
+  if (!Array.isArray(dataOption)) return dataOption;
+  return dataOption.map((dataItem, dataIndex) => {
+    if (!isPlainObject(dataItem)) return dataItem;
+    const fallbackColor = palette.series[(seriesIndex + dataIndex) % palette.series.length];
+    const itemStyle = isPlainObject(dataItem.itemStyle) ? dataItem.itemStyle : {};
+    const label = isPlainObject(dataItem.label) ? dataItem.label : {};
+    return {
+      ...dataItem,
+      color: pickReadableColor(dataItem.color, fallbackColor, isDarkMode),
+      itemStyle: {
+        ...itemStyle,
+        color: pickReadableColor(itemStyle.color, fallbackColor, isDarkMode),
+        borderColor: pickReadableColor(itemStyle.borderColor, fallbackColor, isDarkMode),
+      },
+      label: {
+        ...label,
+        color: palette.text,
+      },
+    };
+  });
+}
+
+function applySeriesTheme(seriesOption, palette, isDarkMode) {
+  if (!Array.isArray(seriesOption)) return seriesOption;
+  return seriesOption.map((seriesItem, seriesIndex) => {
+    if (!isPlainObject(seriesItem)) return seriesItem;
+
+    const label = isPlainObject(seriesItem.label) ? seriesItem.label : {};
+    const labelLine = isPlainObject(seriesItem.labelLine) ? seriesItem.labelLine : {};
+    const lineStyle = isPlainObject(seriesItem.lineStyle) ? seriesItem.lineStyle : {};
+    const itemStyle = isPlainObject(seriesItem.itemStyle) ? seriesItem.itemStyle : {};
+    const areaStyle = isPlainObject(seriesItem.areaStyle) ? seriesItem.areaStyle : {};
+    const fallbackColor = palette.series[seriesIndex % palette.series.length];
+
+    return {
+      ...seriesItem,
+      color: pickReadableColor(seriesItem.color, fallbackColor, isDarkMode),
+      label: {
+        ...label,
+        color: palette.text,
+      },
+      labelLine: {
+        ...labelLine,
+        lineStyle: {
+          ...(isPlainObject(labelLine.lineStyle) ? labelLine.lineStyle : {}),
+          color: palette.axisLine,
+        },
+      },
+      lineStyle: {
+        ...lineStyle,
+        color: pickReadableColor(lineStyle.color, fallbackColor, isDarkMode),
+      },
+      itemStyle: {
+        ...itemStyle,
+        color: pickReadableColor(itemStyle.color, fallbackColor, isDarkMode),
+        borderColor: pickReadableColor(itemStyle.borderColor, fallbackColor, isDarkMode),
+      },
+      areaStyle: {
+        ...areaStyle,
+        color: pickReadableColor(areaStyle.color, fallbackColor, isDarkMode),
+      },
+      data: applySeriesDataTheme(seriesItem.data, palette, isDarkMode, seriesIndex),
+    };
+  });
+}
+
+function applyVisualMapTheme(visualMapOption, palette) {
+  return mapMaybeArray(visualMapOption, (visualMapItem) => {
+    if (!isPlainObject(visualMapItem)) return visualMapItem;
+    return {
+      ...visualMapItem,
+      textStyle: {
+        ...(isPlainObject(visualMapItem.textStyle) ? visualMapItem.textStyle : {}),
+        color: palette.text,
+      },
+    };
+  });
+}
+
+function createThemedChartOption(option, isDarkMode) {
+  if (!isPlainObject(option)) return option;
+
+  const palette = buildChartPalette(isDarkMode);
+  const tooltip = isPlainObject(option.tooltip) ? option.tooltip : {};
+  const axisPointer = isPlainObject(tooltip.axisPointer) ? tooltip.axisPointer : {};
+  const pointerLabel = isPlainObject(axisPointer.label) ? axisPointer.label : {};
+  const radar = isPlainObject(option.radar) ? option.radar : {};
+
+  return {
+    ...option,
+    darkMode: isDarkMode,
+    backgroundColor: "transparent",
+    color: applyColorListTheme(option.color, palette, isDarkMode),
+    textStyle: {
+      ...(isPlainObject(option.textStyle) ? option.textStyle : {}),
+      color: palette.text,
+    },
+    title: applyTitleTheme(option.title, palette),
+    legend: applyLegendTheme(option.legend, palette),
+    xAxis: applyAxisTheme(option.xAxis, palette),
+    yAxis: applyAxisTheme(option.yAxis, palette),
+    angleAxis: applyAxisTheme(option.angleAxis, palette),
+    radiusAxis: applyAxisTheme(option.radiusAxis, palette),
+    visualMap: applyVisualMapTheme(option.visualMap, palette),
+    radar: isPlainObject(option.radar)
+      ? {
+          ...radar,
+          axisName: {
+            ...(isPlainObject(radar.axisName) ? radar.axisName : {}),
+            color: palette.text,
+          },
+          splitLine: {
+            ...(isPlainObject(radar.splitLine) ? radar.splitLine : {}),
+            lineStyle: {
+              ...(isPlainObject(radar.splitLine?.lineStyle) ? radar.splitLine.lineStyle : {}),
+              color: palette.splitLine,
+            },
+          },
+        }
+      : option.radar,
+    tooltip: {
+      ...tooltip,
+      backgroundColor: palette.tooltipBg,
+      borderColor: palette.tooltipBorder,
+      textStyle: {
+        ...(isPlainObject(tooltip.textStyle) ? tooltip.textStyle : {}),
+        color: palette.text,
+      },
+      axisPointer: {
+        ...axisPointer,
+        lineStyle: {
+          ...(isPlainObject(axisPointer.lineStyle) ? axisPointer.lineStyle : {}),
+          color: palette.axisLine,
+        },
+        label: {
+          ...pointerLabel,
+          color: palette.text,
+          backgroundColor: palette.tooltipBg,
+        },
+      },
+    },
+    series: applySeriesTheme(option.series, palette, isDarkMode),
+  };
+}
+
+function AssistantChart({ option, isDarkMode }) {
+  const chartRef = useRef(null);
+  const themedOption = useMemo(
+    () => createThemedChartOption(option, isDarkMode),
+    [option, isDarkMode],
+  );
+
+  useEffect(() => {
+    if (!themedOption || typeof themedOption !== "object" || Array.isArray(themedOption)) {
+      return undefined;
+    }
+    if (!chartRef.current) return undefined;
+
+    const chart = echarts.init(chartRef.current);
+    chart.setOption(themedOption, true);
+    // Ensure chart fits after bubble layout settles.
+    const rafId = window.requestAnimationFrame(() => {
+      chart.resize();
+    });
+    let observer;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        chart.resize();
+      });
+      observer.observe(chartRef.current);
+    }
+
+    const handleResize = () => {
+      chart.resize();
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      observer?.disconnect();
+      window.removeEventListener("resize", handleResize);
+      chart.dispose();
+    };
+  }, [themedOption]);
+
+  if (!themedOption || typeof themedOption !== "object" || Array.isArray(themedOption)) return null;
+
+  return (
+    <Box
+      ref={chartRef}
+      sx={{
+        width: "100%",
+        height: { xs: 240, sm: 300 },
+        mt: 1,
+        border: "1px solid",
+        borderColor: isDarkMode ? "rgba(121, 168, 255, 0.3)" : "divider",
+        borderRadius: 1.5,
+        bgcolor: isDarkMode ? "rgba(10, 13, 20, 0.92)" : "background.default",
+      }}
+    />
+  );
+}
+
+export default function LangflowWidget({ themeMode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isDarkMode = themeMode ? themeMode !== "light" : true;
 
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -150,10 +456,21 @@ export default function LangflowWidget() {
   }, [messages, isOpen, isStreaming]);
 
   const envMissingText = useMemo(() => {
-    if (!apiUrl) return "Missing `VITE_API_URL` or `VITE_MINIMAX_API_URL`.";
-    if (!apiKey) return "Missing `VITE_MINIMAX_API_KEY`.";
+    if (!apiUrl) return "Missing `VITE_CHATBOT_API_URL` or `VITE_API_URL`.";
+    if (Number.isNaN(chatUserId)) return "Invalid `VITE_CHATBOT_USER_ID`.";
     return "";
   }, []);
+  const hasAnyChart = useMemo(
+    () =>
+      messages.some(
+        (item) =>
+          item?.graphOption &&
+          typeof item.graphOption === "object" &&
+          !Array.isArray(item.graphOption) &&
+          Object.keys(item.graphOption).length > 0,
+      ),
+    [messages],
+  );
 
   const sendMessage = async () => {
     const userText = draft.trim();
@@ -166,16 +483,6 @@ export default function LangflowWidget() {
 
     const userMessage = createMessage("user", userText);
     const assistantMessage = createMessage("assistant");
-    const chatHistory = [...messages, userMessage];
-    const recentTwoMessages = chatHistory.slice(-OFFSET);
-    const requestMessages = recentTwoMessages.map((item) => ({
-      role: item.role,
-      content: item.content,
-    }));
-
-    if (systemPrompt.trim()) {
-      requestMessages.unshift({ role: "system", content: systemPrompt.trim() });
-    }
 
     setDraft("");
     setError("");
@@ -184,54 +491,98 @@ export default function LangflowWidget() {
 
     let streamedText = "";
     let streamedImages = [];
+    let streamedGraphOption = null;
     let streamBuffer = "";
+    let streamError = "";
 
     const updateAssistant = () => {
       const cleanedText = sanitizeAssistantText(streamedText);
       const uniqueImages = Array.from(new Set(streamedImages));
       setMessages((current) =>
         current.map((item) =>
-          item.id === assistantMessage.id ? { ...item, content: cleanedText, images: uniqueImages } : item,
+          item.id === assistantMessage.id
+            ? { ...item, content: cleanedText, images: uniqueImages, graphOption: streamedGraphOption }
+            : item,
         ),
       );
     };
 
+    const applyAnswerPayload = (payload) => {
+      if (!payload || typeof payload !== "object") return false;
+      if (typeof payload.text !== "string") return false;
+
+      streamedText = payload.text;
+      if (
+        payload.containsGraph &&
+        payload.graphOption &&
+        typeof payload.graphOption === "object" &&
+        Object.keys(payload.graphOption).length > 0
+      ) {
+        streamedGraphOption = payload.graphOption;
+      } else {
+        streamedGraphOption = null;
+      }
+      updateAssistant();
+      return true;
+    };
+
     const processPayloadText = (payloadText) => {
       if (!payloadText || payloadText === "[DONE]") return;
-
-      let payload;
-      try {
-        payload = JSON.parse(payloadText);
-      } catch {
-        return;
+      const payload = parseJsonSafe(payloadText);
+      if (payload && applyAnswerPayload(payload)) return;
+      if (!payload && payloadText.trim()) {
+        streamedText = payloadText.trim();
+        updateAssistant();
       }
-
-      const delta = extractAssistantDelta(payload);
-      if (delta.statusCode && delta.statusCode !== 0) {
-        throw new Error(delta.statusMsg || "MiniMax service is busy. Please retry.");
-      }
-
-      if (delta.text) streamedText += delta.text;
-      if (delta.images.length > 0) streamedImages = [...streamedImages, ...delta.images];
-      updateAssistant();
     };
 
     const processStreamEvent = (rawEventText) => {
       if (!rawEventText) return;
       const lines = rawEventText.split(/\r?\n/);
-      const dataLines = lines
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim());
+      let eventName = "";
+      const dataLines = [];
 
-      if (dataLines.length === 0) {
-        const fallback = rawEventText.trim();
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+
+      const payloadText = dataLines.join("\n").trim();
+
+      if (!eventName) {
+        const fallback = payloadText || rawEventText.trim();
         if (fallback) processPayloadText(fallback);
         return;
       }
 
-      for (const line of dataLines) {
-        processPayloadText(line);
+      if (eventName === "answer_done") {
+        processPayloadText(payloadText);
+        return;
+      }
+
+      if (eventName === "answer_delta") {
+        const payload = parseJsonSafe(payloadText);
+        const delta =
+          (payload && typeof payload === "object" && typeof payload.delta === "string" && payload.delta) ||
+          payloadText;
+        if (delta) {
+          streamedText += delta;
+          updateAssistant();
+        }
+        return;
+      }
+
+      if (eventName.endsWith("_error")) {
+        const payload = parseJsonSafe(payloadText);
+        const message =
+          (payload && typeof payload === "object" && typeof payload.error === "string" && payload.error) ||
+          payloadText ||
+          eventName;
+        streamError = streamError ? `${streamError} | ${message}` : message;
+        return;
       }
     };
 
@@ -281,18 +632,17 @@ export default function LangflowWidget() {
 
     /* Generate AI Request Here! */
     try {
-      const response = await fetch(apiUrl, {
+      const requestUrl = apiUrl.endsWith("/chat") ? apiUrl : `${apiUrl.replace(/\/+$/, "")}/chat`;
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
         body: JSON.stringify({
-          model: modelName,
-          messages: requestMessages,
-          temperature: 0.1,
-          stream: true,
+          prompt: userText,
+          user_id: chatUserId,
+          system: systemPrompt.trim(),
         }),
       });
 
@@ -315,6 +665,9 @@ export default function LangflowWidget() {
         streamedText = "I received your message, but the response body was empty.";
       }
 
+      if (streamError) {
+        setError(`Assistant request failed: ${streamError}`);
+      }
       updateAssistant();
     } catch (requestError) {
       let apiErrorText = requestError?.message || "Request failed.";
@@ -324,6 +677,7 @@ export default function LangflowWidget() {
           apiErrorText =
             parsedError?.base_resp?.status_msg ||
             parsedError?.error?.message ||
+            parsedError?.detail ||
             parsedError?.message ||
             apiErrorText;
         } catch {
@@ -335,7 +689,7 @@ export default function LangflowWidget() {
       setMessages((current) =>
         current.map((item) =>
           item.id === assistantMessage.id
-            ? { ...item, content: "I could not generate a response this time.", images: [] }
+            ? { ...item, content: "I could not generate a response this time.", images: [], graphOption: null }
             : item,
         ),
       );
@@ -357,7 +711,7 @@ export default function LangflowWidget() {
         <Paper
           elevation={18}
           sx={{
-            width: { xs: "calc(100vw - 24px)", sm: 420 },
+            width: { xs: "calc(100vw - 24px)", sm: hasAnyChart ? 640 : 420 },
             height: { xs: "min(74vh, 640px)", sm: 620 },
             mt: 1.5,
             borderRadius: 3,
@@ -421,8 +775,20 @@ export default function LangflowWidget() {
 
             {messages.map((item) => {
               const isUser = item.role === "user";
+              const hasGraph =
+                !isUser &&
+                item.graphOption &&
+                typeof item.graphOption === "object" &&
+                !Array.isArray(item.graphOption) &&
+                Object.keys(item.graphOption).length > 0;
               return (
-                <Stack key={item.id} direction="row" spacing={1} justifyContent={isUser ? "flex-end" : "flex-start"}>
+                <Stack
+                  key={item.id}
+                  direction="row"
+                  spacing={1}
+                  justifyContent={isUser ? "flex-end" : "flex-start"}
+                  sx={{ width: "100%" }}
+                >
                   {!isUser && (
                     <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", mt: 0.5 }}>
                       <SmartToyRoundedIcon sx={{ fontSize: 18 }} />
@@ -434,12 +800,16 @@ export default function LangflowWidget() {
                     sx={{
                       px: 1.25,
                       py: 1,
-                      maxWidth: "84%",
+                      width: hasGraph ? "auto" : undefined,
+                      flex: hasGraph ? 1 : "0 1 auto",
+                      maxWidth: hasGraph ? "none" : "84%",
+                      minWidth: 0,
                       borderRadius: 2.25,
                       border: "1px solid",
                       borderColor: isUser ? "primary.main" : "divider",
                       bgcolor: isUser ? "primary.main" : "background.paper",
                       color: isUser ? "primary.contrastText" : "text.primary",
+                      overflow: "visible",
                     }}
                   >
                     <Typography
@@ -468,6 +838,8 @@ export default function LangflowWidget() {
                         ))}
                       </Stack>
                     )}
+
+                    {!isUser && <AssistantChart option={item.graphOption} isDarkMode={isDarkMode} />}
                   </Paper>
 
                   {isUser && (
@@ -523,7 +895,7 @@ export default function LangflowWidget() {
             </Stack>
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
               <Chip size="small" icon={<ImageRoundedIcon />} label="Image output enabled" variant="outlined" />
-              <Chip size="small" label="Temp 0.1" variant="outlined" />
+              <Chip size="small" label="Gemini backend" variant="outlined" />
             </Stack>
           </Box>
         </Paper>

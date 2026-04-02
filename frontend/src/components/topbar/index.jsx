@@ -1,5 +1,6 @@
 import React from "react";
-import { FormControlLabel, Switch } from "@mui/material";
+import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
+import LightModeRoundedIcon from "@mui/icons-material/LightModeRounded";
 
 function BrandLockup() {
   // Keep the logo and brand copy centered on the same vertical axis.
@@ -56,21 +57,24 @@ function SessionState({ isLoggedIn, onLogout }) {
   );
 }
 
-/* Update the Theme Switch Logic here. */
 function ThemeToggle({ theme, onThemeToggle }) {
-  // Mirror the current theme state with a readable action label.
+  const isDark = theme === "dark";
+  const ariaLabel = isDark ? "Switch to light mode" : "Switch to dark mode";
+
   return (
-    <FormControlLabel
-      className="theme-switch"
-      control={
-        <Switch
-          checked={theme === "dark"}
-          onChange={() => onThemeToggle()}
-          inputProps={{ "aria-label": "Toggle theme" }}
-        />
-      }
-      label={theme === "dark" ? "Black Mode" : "White Mode"}
-    />
+    <button
+      type="button"
+      className="theme-pill theme-icon-toggle"
+      onClick={onThemeToggle}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    >
+      {isDark ? (
+        <LightModeRoundedIcon className="theme-icon" fontSize="small" />
+      ) : (
+        <DarkModeRoundedIcon className="theme-icon" fontSize="small" />
+      )}
+    </button>
   );
 }
 
