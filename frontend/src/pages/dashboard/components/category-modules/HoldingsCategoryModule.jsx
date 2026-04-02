@@ -1,20 +1,22 @@
 import React from "react";
-import { DonutChart, MetricCards } from "./CategoryShared";
+import { InteractiveDonutChart, MetricCards } from "./CategoryShared";
 
-export default function HoldingsCategoryModule({ category, donutSegments }) {
-  const legendItems = Array.isArray(donutSegments)
-    ? donutSegments.filter((item) => Number.isFinite(Number(item?.pct)) && Number(item.pct) > 0)
+export default function HoldingsCategoryModule({
+  category,
+  industryDonutSegments,
+  symbolAllocationSegments,
+  capitalSplitSegments,
+  reportingCurrency,
+}) {
+  const industrySegments = Array.isArray(industryDonutSegments)
+    ? industryDonutSegments.filter((item) => Number.isFinite(Number(item?.pct)) && Number(item.pct) > 0)
     : [];
-
-  function formatLegendPercent(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-      return "N/A";
-    }
-    const rounded = Number(numeric.toFixed(2));
-    const digits = Number.isInteger(rounded) ? 0 : 1;
-    return `${rounded.toFixed(digits)}%`;
-  }
+  const symbolSegments = Array.isArray(symbolAllocationSegments)
+    ? symbolAllocationSegments.filter((item) => Number.isFinite(Number(item?.pct)) && Number(item.pct) > 0)
+    : [];
+  const capitalSegments = Array.isArray(capitalSplitSegments)
+    ? capitalSplitSegments.filter((item) => Number.isFinite(Number(item?.pct)) && Number(item.pct) > 0)
+    : [];
 
   return (
     <div className="holdings-dist-layout">
@@ -22,31 +24,37 @@ export default function HoldingsCategoryModule({ category, donutSegments }) {
         <MetricCards metrics={category.metrics} accent={category.accent} />
       </div>
       <article className="holdings-pie-panel">
-        <p className="perf-chart-heading">Industry Distribution</p>
-        <p className="perf-chart-sub" style={{ color: category.accent }}>
-          Sector breakdown by portfolio allocation
-        </p>
-        <div className="holdings-pie-content">
-          <div className="holdings-pie-chart-wrap">
-            <DonutChart segments={donutSegments} />
+        <div className="holdings-pie-grid">
+          <div className="holdings-pie-card">
+            <p className="perf-chart-heading">Industry Distribution</p>
+            <p className="perf-chart-sub" style={{ color: category.accent }}>
+              Sector breakdown by current holdings value.
+            </p>
+            <InteractiveDonutChart segments={industrySegments} currency={reportingCurrency} />
+            <p className="holdings-pie-note">
+              Shows how invested capital is spread across industries.
+            </p>
           </div>
-          <ul className="holdings-pie-legend">
-            {legendItems.map((item, index) => (
-              <li className="holdings-pie-legend-item" key={`${item.label || "segment"}-${index}`}>
-                <span
-                  className="holdings-pie-legend-swatch"
-                  style={{ backgroundColor: item.color || category.accent }}
-                  aria-hidden="true"
-                />
-                <span className="holdings-pie-legend-label" title={item.label || "Unknown"}>
-                  {item.label || "Unknown"}
-                </span>
-                <span className="holdings-pie-legend-value">
-                  {formatLegendPercent(item.pct)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="holdings-pie-card">
+            <p className="perf-chart-heading">Symbol Allocation</p>
+            <p className="perf-chart-sub" style={{ color: category.accent }}>
+              Position weights by symbol and market value.
+            </p>
+            <InteractiveDonutChart segments={symbolSegments} currency={reportingCurrency} />
+            <p className="holdings-pie-note">
+              Shows the allocation split among current holding symbols.
+            </p>
+          </div>
+          <div className="holdings-pie-card">
+            <p className="perf-chart-heading">Capital Deployment</p>
+            <p className="perf-chart-sub" style={{ color: category.accent }}>
+              Holdings share versus total portfolio value.
+            </p>
+            <InteractiveDonutChart segments={capitalSegments} currency={reportingCurrency} />
+            <p className="holdings-pie-note">
+              Shows how much of total portfolio value is currently invested.
+            </p>
+          </div>
         </div>
       </article>
     </div>

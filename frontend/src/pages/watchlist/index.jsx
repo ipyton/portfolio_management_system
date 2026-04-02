@@ -841,7 +841,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   return (
     <section className="watchlist-page watchlist-shell watchlist-component">
       <header className="watchlist-header">
-        <h1 className="watchlist-title">Watch List</h1>
+        <h1 className="watchlist-title">Watchlist</h1>
         <WatchlistSearch
           searchTerm={searchTerm}
           isSearching={searchingSuggestions}
