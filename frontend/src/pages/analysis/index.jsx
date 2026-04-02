@@ -12,29 +12,8 @@ import "./analysis.css";
 export const analysisPageMeta = {
   eyebrow: "Strategy Analysis",
   title: "Build and test a portfolio quickly.",
-  description: "Select a profile, build a basket, then run analysis.",
+  description: "Build a basket, then run analysis.",
   metrics: [],
-};
-
-const PROFILE_PRESETS = {
-  conservative: {
-    label: "Conservative",
-    description: "Lower risk, benchmark tilt.",
-    seeds: ["SPX", "MSFT", "AAPL"],
-    weights: [0.5, 0.3, 0.2],
-  },
-  balanced: {
-    label: "Balanced",
-    description: "Diversified growth.",
-    seeds: ["AAPL", "MSFT", "NVDA"],
-    weights: [0.34, 0.33, 0.33],
-  },
-  aggressive: {
-    label: "Aggressive",
-    description: "Higher risk, growth tilt.",
-    seeds: ["NVDA", "TSLA", "AAPL"],
-    weights: [0.45, 0.35, 0.2],
-  },
 };
 
 const BACKTEST_WINDOWS = [30, 90, 180, 365];
@@ -858,9 +837,6 @@ function covarianceMatrix(seriesList) {
 }
 
 export default function AnalysisPage({ meta }) {
-  const [profile, setProfile] = useState("");
-  const [recommendations, setRecommendations] = useState([]);
-  const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -878,8 +854,6 @@ export default function AnalysisPage({ meta }) {
   const [sharpeError, setSharpeError] = useState("");
   const [sharpeResult, setSharpeResult] = useState(null);
   const [activeSection, setActiveSection] = useState("backtest");
-
-  const profilePreset = profile ? PROFILE_PRESETS[profile] : null;
   const basketSymbolSet = useMemo(
     () => new Set(basket.map((item) => (item.symbol || "").toUpperCase())),
     [basket],
@@ -930,77 +904,6 @@ export default function AnalysisPage({ meta }) {
     }
     return basket.map((item) => ({ ...item, weight: Number(item.weight || 0) / totalWeight }));
   }, [basket]);
-
-  async function generateRecommendations(preset = profilePreset) {
-    if (!preset) {
-      return;
-    }
-    setRecommendationLoading(true);
-    setBacktestError("");
-    try {
-      let picked = [];
-      if (profile) {
-        const recommendationResponse = await apiFetch(
-          `/api/assets/recommendations?profile=${encodeURIComponent(profile)}&limit=5&lookbackDays=180`,
-        );
-        picked = (recommendationResponse.items || []).map((item) => ({
-          ...item,
-          targetWeight: Number(item.targetWeight || 0),
-        }));
-      }
-
-      if (!picked.length) {
-        const responseList = await Promise.all(
-          preset.seeds.map((seed) =>
-            apiFetch(`/api/assets/suggestions?query=${encodeURIComponent(seed)}&limit=4`),
-          ),
-        );
-
-        const merged = [];
-        const seen = new Set();
-        responseList.forEach((response) => {
-          (response.items || []).forEach((item) => {
-            const key = (item.symbol || "").toUpperCase();
-            if (!key || seen.has(key)) {
-              return;
-            }
-            seen.add(key);
-            merged.push(item);
-          });
-        });
-
-        picked = merged.slice(0, 5).map((item, index) => ({
-          ...item,
-          targetWeight: preset.weights[index] ?? Math.max(0.1, 1 / Math.max(1, merged.length)),
-        }));
-      }
-
-      setRecommendations(picked);
-      setBasket((current) => {
-        if (current.length || !picked.length) {
-          return current;
-        }
-        return picked.slice(0, 3).map((item) => ({
-          symbol: item.symbol,
-          name: item.name,
-          weight: item.targetWeight,
-        }));
-      });
-    } catch (error) {
-      setRecommendations([]);
-      setBacktestError(error.message);
-    } finally {
-      setRecommendationLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!profilePreset) {
-      setRecommendations([]);
-      return;
-    }
-    generateRecommendations(profilePreset);
-  }, [profilePreset]);
 
   useEffect(() => {
     setBacktestResult(null);
@@ -1308,101 +1211,16 @@ export default function AnalysisPage({ meta }) {
 
   return (
     <>
-      <section className="hero-panel analysis-hero">
-        <p className="eyebrow">{meta.eyebrow}</p>
-        <div className="hero-heading-row">
-          <div>
-            <h1>{meta.title}</h1>
-            <p className="hero-copy">{meta.description}</p>
-          </div>
-          <div className="hero-status-card">
-            <span>Analysis State</span>
-            <strong>{profile ? "Ready" : "No profile"}</strong>
-            <p>
-              {profile
-                ? `${PROFILE_PRESETS[profile].label} profile selected.`
-                : "You can search and build basket directly."}
-            </p>
-          </div>
-        </div>
-
-      </section>
-
       <section className="watchlist-page watchlist-shell watchlist-component analysis-shell">
         <div className="watchlist-header">
           <div>
             <p className="eyebrow">Setup</p>
             <h2 className="watchlist-title">Build Basket</h2>
           </div>
-          <div className="analysis-actions">
-            <button
-              type="button"
-              className="search-button"
-              disabled={!profile || recommendationLoading}
-              onClick={generateRecommendations}
-            >
-              {recommendationLoading ? "Refreshing..." : "Refresh Suggestions"}
-            </button>
-          </div>
-        </div>
-
-        <div className="analysis-profile-grid">
-          {Object.entries(PROFILE_PRESETS).map(([id, preset]) => (
-            <button
-              key={id}
-              type="button"
-              className={`analysis-profile-card${profile === id ? " active" : ""}`}
-              onClick={() => setProfile(id)}
-            >
-              <strong>{preset.label}</strong>
-              <p>{preset.description}</p>
-            </button>
-          ))}
         </div>
 
         <div className="watchlist-grid">
           <section className="watchlist-panel">
-            <div className="card-head">
-              <span>Recommendations</span>
-              <strong>{recommendations.length}</strong>
-            </div>
-            {!profile ? (
-              <EmptyState
-                title="Suggestions unavailable"
-                description="Select a profile to auto-generate."
-              />
-            ) : !recommendations.length ? (
-              <EmptyState
-                title="No recommendations yet"
-                description="Click Refresh Suggestions."
-              />
-            ) : (
-              <div className="watchlist-table">
-                {recommendations.map((item) => {
-                  const symbol = (item.symbol || "").toUpperCase();
-                  const added = basketSymbolSet.has(symbol);
-                  return (
-                    <button
-                      key={`${item.symbol}-${item.assetId ?? "remote"}`}
-                      type="button"
-                      className={`watchlist-row${added ? " selected" : ""}`}
-                      onClick={() => addToBasket(item)}
-                      disabled={added}
-                    >
-                      <div>
-                        <strong className="ticker">{item.symbol}</strong>
-                        <p>{item.name}</p>
-                      </div>
-                      <div>
-                        <strong>{added ? "Added" : `${Math.round((item.targetWeight || 0) * 100)}%`}</strong>
-                        <p>{added ? "In basket" : "Weight"}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
             <div className="search-results">
               <div className="card-head">
                 <span>Search & Add</span>
@@ -1481,7 +1299,7 @@ export default function AnalysisPage({ meta }) {
               {!normalizedBasket.length ? (
                 <EmptyState
                   title="Basket is empty"
-                  description="Add assets from recommendations or search."
+                  description="Search and add assets to begin."
                 />
               ) : (
                 <div className="analysis-basket-list">
