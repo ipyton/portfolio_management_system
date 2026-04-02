@@ -36,7 +36,7 @@ twelve-data:
   base-url: ${TWELVE_DATA_BASE_URL:https://api.twelvedata.com}
   timeout: ${TWELVE_DATA_TIMEOUT:5s}
   api-key: ${TWELVE_DATA_API_KEY:}
-  api-keys: ${TWELVE_DATA_API_KEYS:c993f88aa55f41418fc3449756880e99,9a2ab1f6c57b4aeb803d0ca5b5167e18}
+  api-keys: ${TWELVE_DATA_API_KEYS:c993f88aa55f41418fc3449756880e99,9a2ab1f6c57b4aeb803d0ca5b5167e18,ce1ee511657844b5afe6cf8a762d4da9}
   max-requests-per-minute: ${TWELVE_DATA_MAX_REQUESTS_PER_MINUTE:6}
   rate-limit-cooldown: ${TWELVE_DATA_RATE_LIMIT_COOLDOWN:65s}
 eastmoney:

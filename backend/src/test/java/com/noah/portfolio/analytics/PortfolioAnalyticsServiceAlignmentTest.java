@@ -22,6 +22,7 @@ import com.noah.portfolio.analytics.repository.SystemConfigRepository;
 import com.noah.portfolio.analytics.service.PortfolioAnalyticsService;
 import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
+import com.noah.portfolio.asset.service.AssetMetadataEnrichmentService;
 import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.scheduler.service.PortfolioNavSnapshotService;
 import com.noah.portfolio.trading.repository.CashAccountRepository;
@@ -43,6 +44,7 @@ class PortfolioAnalyticsServiceAlignmentTest {
         FxRateService fxRateService = mock(FxRateService.class);
         FinnhubClient finnhubClient = mock(FinnhubClient.class);
         PortfolioNavSnapshotService portfolioNavSnapshotService = mock(PortfolioNavSnapshotService.class);
+        AssetMetadataEnrichmentService assetMetadataEnrichmentService = mock(AssetMetadataEnrichmentService.class);
 
         List<PortfolioNavDailyEntity> navSeries = List.of(
                 nav(LocalDate.of(2026, 1, 1), 100.0, null),
@@ -81,7 +83,8 @@ class PortfolioAnalyticsServiceAlignmentTest {
                 systemConfigRepository,
                 fxRateService,
                 finnhubClient,
-                portfolioNavSnapshotService
+                portfolioNavSnapshotService,
+                assetMetadataEnrichmentService
         );
 
         Map<String, Object> response = service.getDashboardSummary(1L, "SPX", "USD");

@@ -162,7 +162,7 @@ public class FinnhubClient {
                             decimal(metrics, "currentDividendYieldTTM")
                     ),
                     text(profile, "weburl"),
-                    text(profile, "finnhubIndustry"),
+                    null,
                     text(profile, "finnhubIndustry"),
                     null,
                     null,
