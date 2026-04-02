@@ -26,6 +26,10 @@
   gap: 10px;
 }
 
+.analysis-shell .search-results {
+  margin-top: -4px;
+}
+
 .analysis-shell .search-button {
   border: none;
   background: #4b5563;
@@ -162,7 +166,7 @@
 
 .analysis-shell .analysis-stage-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   width: min(360px, 100%);
   margin-left: auto;

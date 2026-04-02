@@ -206,18 +206,25 @@ function toSparklinePolyline(points) {
   const min = Math.min(...points);
   const max = Math.max(...points);
   const range = Math.max(max - min, 1e-9);
+  const isFlat = Math.abs(max - min) < 1e-9;
 
   return points.map((value, index) => {
     const x = (index / (points.length - 1)) * width;
-    const y = height - ((value - min) / range) * height;
+    const y = isFlat ? height / 2 : height - ((value - min) / range) * height;
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
 }
 
-function Sparkline({ points, tone }) {
-  const polyline = toSparklinePolyline(points);
+function Sparkline({ points, tone, fallbackValue }) {
+  const numericPoints = Array.isArray(points)
+    ? points.filter((value) => Number.isFinite(value))
+    : [];
+  const drawablePoints = numericPoints.length === 1
+    ? [numericPoints[0], numericPoints[0]]
+    : numericPoints;
+  const polyline = toSparklinePolyline(drawablePoints);
   if (!polyline) {
-    return <span className="world-index-sparkline-empty">N/A</span>;
+    return <span className="world-index-sparkline-empty">{formatPrice(fallbackValue)}</span>;
   }
 
   return (
@@ -655,7 +662,7 @@ export default function WorldIndicesPanel() {
                 <span className="world-index-refresh-time">{formatRefreshTime(item.refreshedAt)}</span>
               </div>
               <div className="world-index-trend">
-                <Sparkline points={item.sparkline} tone={tone} />
+                <Sparkline points={item.sparkline} tone={tone} fallbackValue={item.latest} />
               </div>
             </article>
           );

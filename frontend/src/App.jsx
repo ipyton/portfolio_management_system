@@ -122,10 +122,6 @@ export default function App() {
           ) : (
             <section className="hero-panel auth-gate" aria-live="polite">
               <p className="eyebrow">Authentication Required</p>
-              <h1>Enter password to unlock backend access</h1>
-              <p className="hero-copy">
-                This frontend sends the password as request key for every API call.
-              </p>
               <form className="auth-form" onSubmit={handleAuthSubmit}>
                 <label htmlFor="auth-password" className="auth-label">
                   Password
@@ -149,13 +145,7 @@ export default function App() {
                     ? <LoadingInline label="Verifying..." size="xs" tone="inverted" />
                     : "Unlock"}
                 </button>
-                {authError ? (
-                  <p className="auth-error">{authError}</p>
-                ) : (
-                  <p className="auth-hint">
-                    Backend checks this against `REQUEST_KEY`.
-                  </p>
-                )}
+                {authError ? <p className="auth-error">{authError}</p> : null}
               </form>
             </section>
           )}

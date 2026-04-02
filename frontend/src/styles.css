@@ -297,6 +297,7 @@ button {
   border-radius: 999px;
   background: var(--breadcrumb-bg);
   color: var(--breadcrumb-text);
+  font-weight: 700;
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }

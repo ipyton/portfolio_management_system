@@ -237,7 +237,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
   const [loading, setLoading] = useState(false);
   const [loadingHistoryFor, setLoadingHistoryFor] = useState("");
   const [savingSymbol, setSavingSymbol] = useState("");
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [searchError, setSearchError] = useState("");
   const [tradeModal, setTradeModal] = useState({ open: false, type: null });
@@ -257,7 +256,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       if (isLoggedIn) {
         return true;
       }
-      setNotice("");
       setError(`Guest mode cannot ${actionLabel}. Switch to Logged in to continue.`);
       return false;
     },
@@ -640,7 +638,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
 
     setSavingSymbol(candidate.symbol);
     setError("");
-    setNotice("");
     try {
       const payload = {
         userId: DEFAULT_USER_ID,
@@ -657,7 +654,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       const row = mapWatchlistItemToRow(created, null, null, false, fxRateMap);
       setRows((currentRows) => [row, ...currentRows.filter((item) => item.symbol !== row.symbol)]);
       setSelected(row);
-      setNotice(`${row.symbol} has been added to watchlist.`);
       setSearchTerm("");
       setSuggestionRows([]);
       setShowSuggestions(false);
@@ -680,7 +676,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
 
     setSavingSymbol(selected.symbol);
     setError("");
-    setNotice("");
     try {
       await apiFetch(
         `/api/watchlists/${selected.assetId}?userId=${DEFAULT_USER_ID}`,
@@ -692,7 +687,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
         return nextRows;
       });
       setSelected(null);
-      setNotice(`${selected.symbol} has been removed from watchlist.`);
     } catch (requestError) {
       setError(requestError.message || "Failed to remove watchlist item.");
     } finally {
@@ -733,7 +727,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
 
     setTradeSubmitting(true);
     setError("");
-    setNotice("");
 
     try {
       const endpoint = tradeModal.type === "buy" ? "/api/trades/buy" : "/api/trades/sell";
@@ -901,7 +894,6 @@ export default function WatchlistPage({ isLoggedIn = true }) {
           />
         </p>
       )}
-      {notice && <p className="watchlist-note">{notice}</p>}
       {error && <p className="inline-error">{error}</p>}
       {searchError && <p className="inline-error">{searchError}</p>}
 
