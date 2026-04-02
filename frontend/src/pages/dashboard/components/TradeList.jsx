@@ -1,4 +1,5 @@
 import React from "react";
+import { formatCurrency } from "../../../lib/api";
 
 export default function TradeList({
   trades,
@@ -39,7 +40,7 @@ export default function TradeList({
           visibleTrades.map((trade) => (
             <div key={trade.id} className="activity-item" style={{ justifyContent: "space-between" }}>
               <p>
-                <strong>{trade.symbol}</strong> · {trade.side} · {trade.shares} @ ${trade.price.toFixed(2)}
+                <strong>{trade.symbol}</strong> · {trade.side} · {trade.shares} @ {formatCurrency(trade.price, "USD")}
               </p>
               <p>{trade.date}</p>
             </div>

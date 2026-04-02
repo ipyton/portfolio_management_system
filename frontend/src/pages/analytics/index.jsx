@@ -41,7 +41,7 @@ export default function AnalyticsPage({ label, meta }) {
 
       try {
         const response = await apiFetch(
-          `/api/portfolio/dashboard?baseCurrency=CNY&userId=${DEFAULT_USER_ID}`,
+          `/api/portfolio/dashboard?baseCurrency=USD&userId=${DEFAULT_USER_ID}`,
         );
         if (!cancelled) {
           setAnalytics(response);
@@ -86,9 +86,9 @@ export default function AnalyticsPage({ label, meta }) {
             <p>
               {loading
                 ? "Loading portfolio summary from the backend."
-                : error
+                  : error
                   ? error
-                  : `As of ${analytics?.asOf || "N/A"} in ${metaSection.reportingCurrency || "CNY"}.`}
+                  : `As of ${analytics?.asOf || "N/A"} in ${metaSection.reportingCurrency || "USD"}.`}
             </p>
           </div>
         </div>
@@ -112,7 +112,7 @@ export default function AnalyticsPage({ label, meta }) {
           />
           <MetricCard
             label="Today's P&L"
-            value={formatCurrency(realtime.todayPnl, metaSection.reportingCurrency || "CNY")}
+            value={formatCurrency(realtime.todayPnl, metaSection.reportingCurrency || "USD")}
             detail="Latest mark-to-market move"
             tone={classForDelta(realtime.todayPnl)}
           />
@@ -196,14 +196,14 @@ export default function AnalyticsPage({ label, meta }) {
         <article className="feature-card">
           <div className="card-head">
             <span>Allocation</span>
-            <strong>{metaSection.reportingCurrency || "CNY"}</strong>
+            <strong>{metaSection.reportingCurrency || "USD"}</strong>
           </div>
           <div className="pill-list">
             {(holdings.assetClassDistribution || []).map((item) => (
               <div key={item.name} className="pill-list__item">
                 <strong>{item.name}</strong>
                 <span>{formatPercent(item.weight)}</span>
-                <p>{formatCurrency(item.marketValue, metaSection.reportingCurrency || "CNY")}</p>
+                <p>{formatCurrency(item.marketValue, metaSection.reportingCurrency || "USD")}</p>
               </div>
             ))}
           </div>
@@ -235,13 +235,13 @@ export default function AnalyticsPage({ label, meta }) {
               <span>
                 {formatCurrency(
                   trade.reportingCurrencyAmount,
-                  metaSection.reportingCurrency || "CNY",
+                  metaSection.reportingCurrency || "USD",
                 )}
               </span>
               <span>
                 {formatCurrency(
                   trade.reportingCurrencyFee,
-                  metaSection.reportingCurrency || "CNY",
+                  metaSection.reportingCurrency || "USD",
                 )}
               </span>
               <span>{formatDate(trade.tradedAt)}</span>

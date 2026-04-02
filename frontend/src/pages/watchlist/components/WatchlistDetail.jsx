@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { formatCurrency } from "../../../lib/api";
 
 const formatCompactNumber = (value) => {
   const numeric = Number(value);
@@ -35,11 +36,21 @@ export default function WatchlistDetail({
   onRemove,
   isRemoving,
   interactionDisabled,
+  toUsdAmount,
 }) {
   const isDarkMode =
     typeof document !== "undefined"
     && document.documentElement.getAttribute("data-theme") !== "light";
-  const chartData = useMemo(() => selected?.priceHistory ?? [], [selected]);
+  const chartData = useMemo(() => {
+    const source = selected?.priceHistory ?? [];
+    const sourceCurrency = selected?.currency;
+    return source
+      .map((point) => {
+        const usdPrice = toUsdAmount ? toUsdAmount(point?.price, sourceCurrency) : null;
+        return { ...point, price: usdPrice };
+      })
+      .filter((point) => Number.isFinite(Number(point.price)));
+  }, [selected, toUsdAmount]);
   const chartPalette = useMemo(
     () => (
       isDarkMode
@@ -105,7 +116,7 @@ export default function WatchlistDetail({
               width={40}
             />
             <Tooltip
-              formatter={(value) => [`$${value}`, "Price"]}
+              formatter={(value) => [formatCurrency(value, "USD"), "Price (USD)"]}
               labelFormatter={(label) => `Date: ${label}`}
               contentStyle={{
                 background: chartPalette.tooltipBg,

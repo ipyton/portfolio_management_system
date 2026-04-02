@@ -23,7 +23,6 @@ import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
 import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.scheduler.config.SchedulerProperties;
 import com.noah.portfolio.trading.repository.CashAccountRepository;
-import com.noah.portfolio.trading.entity.CashTransactionEntity;
 import com.noah.portfolio.trading.repository.CashTransactionRepository;
 import com.noah.portfolio.trading.model.CashTransactionType;
 import com.noah.portfolio.trading.entity.HoldingEntity;
@@ -36,6 +35,13 @@ public class PortfolioNavSnapshotService {
 
     private static final Logger log = LoggerFactory.getLogger(PortfolioNavSnapshotService.class);
     private static final int SCALE = 6;
+    private static final List<CashTransactionType> EXTERNAL_FLOW_TYPES = List.of(
+            CashTransactionType.DEPOSIT,
+            CashTransactionType.WITHDRAW
+    );
+    private static final BigDecimal EXTREME_DAILY_RETURN_THRESHOLD = new BigDecimal("0.80");
+    private static final BigDecimal PREVIOUS_DAY_FLOW_IMPACT_THRESHOLD = new BigDecimal("0.30");
+    private static final BigDecimal ADJUSTMENT_IMPROVEMENT_THRESHOLD = new BigDecimal("0.20");
 
     private final UserRepository userRepository;
     private final HoldingRepository holdingRepository;
@@ -147,30 +153,81 @@ public class PortfolioNavSnapshotService {
             Optional<PortfolioNavDailyEntity> previousSnapshot,
             BigDecimal totalValue
     ) {
-        if (previousSnapshot.isEmpty() || previousSnapshot.get().getTotalValue() == null
-                || previousSnapshot.get().getTotalValue().compareTo(BigDecimal.ZERO) <= 0) {
+        if (previousSnapshot.isEmpty()) {
+            return null;
+        }
+        PortfolioNavDailyEntity previous = previousSnapshot.get();
+        BigDecimal previousTotalValue = previous.getTotalValue();
+        if (previousTotalValue == null || previousTotalValue.compareTo(BigDecimal.ZERO) <= 0) {
             return null;
         }
 
-        Instant startInclusive = previousSnapshot.get().getNavDate().plusDays(1).atStartOfDay(zoneId).toInstant();
+        Instant previousDayStart = previous.getNavDate().atStartOfDay(zoneId).toInstant();
+        Instant startInclusive = previous.getNavDate().plusDays(1).atStartOfDay(zoneId).toInstant();
         Instant endExclusive = navDate.plusDays(1).atStartOfDay(zoneId).toInstant();
-        BigDecimal externalFlow = cashTransactionRepository.findSuccessfulTransactionsInWindow(
+        BigDecimal externalFlow = sumExternalFlow(userId, reportingCurrency, startInclusive, endExclusive);
+        BigDecimal dailyReturn = computeDailyReturn(totalValue, previousTotalValue, externalFlow);
+
+        if (!isExtremeReturn(dailyReturn)) {
+            return dailyReturn;
+        }
+
+        BigDecimal previousDayExternalFlow = sumExternalFlow(userId, reportingCurrency, previousDayStart, startInclusive);
+        if (!hasLargePreviousDayExternalFlow(previousDayExternalFlow, previousTotalValue)) {
+            return dailyReturn;
+        }
+
+        BigDecimal adjustedExternalFlow = externalFlow.add(previousDayExternalFlow);
+        BigDecimal adjustedDailyReturn = computeDailyReturn(totalValue, previousTotalValue, adjustedExternalFlow);
+        if (adjustedDailyReturn != null && shouldUseAdjustedReturn(dailyReturn, adjustedDailyReturn)) {
+            log.info(
+                    "Adjusted daily return with previous-day external flow for user {} on navDate {}. "
+                            + "raw={}, adjusted={}, previousDayFlow={}",
+                    userId,
+                    navDate,
+                    dailyReturn,
+                    adjustedDailyReturn,
+                    previousDayExternalFlow
+            );
+            return adjustedDailyReturn;
+        }
+        return dailyReturn;
+    }
+
+    private BigDecimal sumExternalFlow(Long userId, String reportingCurrency, Instant startInclusive, Instant endExclusive) {
+        return cashTransactionRepository.findSuccessfulTransactionsInWindow(
                         userId,
                         // Business rule: dividends are treated as investment return, not external cash flow.
-                        List.of(CashTransactionType.DEPOSIT, CashTransactionType.WITHDRAW),
+                        EXTERNAL_FLOW_TYPES,
                         startInclusive,
                         endExclusive
                 ).stream()
-                .map(tx -> convertIfAvailable(
-                        tx.getAmount() == null ? zero() : tx.getAmount(),
-                        tx.getCurrency(),
-                        reportingCurrency
-                ))
+                .map(tx -> convertIfAvailable(tx.getAmount() == null ? zero() : tx.getAmount(), tx.getCurrency(), reportingCurrency))
                 .filter(Objects::nonNull)
                 .reduce(zero(), BigDecimal::add);
+    }
 
-        BigDecimal numerator = totalValue.subtract(previousSnapshot.get().getTotalValue()).subtract(externalFlow);
-        return numerator.divide(previousSnapshot.get().getTotalValue(), SCALE, RoundingMode.HALF_UP);
+    private BigDecimal computeDailyReturn(BigDecimal totalValue, BigDecimal previousTotalValue, BigDecimal externalFlow) {
+        BigDecimal numerator = totalValue.subtract(previousTotalValue).subtract(externalFlow);
+        return numerator.divide(previousTotalValue, SCALE, RoundingMode.HALF_UP);
+    }
+
+    private boolean isExtremeReturn(BigDecimal dailyReturn) {
+        return dailyReturn != null && dailyReturn.abs().compareTo(EXTREME_DAILY_RETURN_THRESHOLD) >= 0;
+    }
+
+    private boolean hasLargePreviousDayExternalFlow(BigDecimal previousDayExternalFlow, BigDecimal previousTotalValue) {
+        if (previousTotalValue.compareTo(BigDecimal.ZERO) <= 0 || previousDayExternalFlow == null) {
+            return false;
+        }
+        BigDecimal impact = previousDayExternalFlow.abs().divide(previousTotalValue, SCALE + 2, RoundingMode.HALF_UP);
+        return impact.compareTo(PREVIOUS_DAY_FLOW_IMPACT_THRESHOLD) >= 0;
+    }
+
+    private boolean shouldUseAdjustedReturn(BigDecimal rawDailyReturn, BigDecimal adjustedDailyReturn) {
+        BigDecimal rawMagnitude = rawDailyReturn.abs();
+        BigDecimal adjustedMagnitude = adjustedDailyReturn.abs();
+        return adjustedMagnitude.add(ADJUSTMENT_IMPROVEMENT_THRESHOLD).compareTo(rawMagnitude) < 0;
     }
 
     private BigDecimal resolveNetValue(Optional<PortfolioNavDailyEntity> previousSnapshot, BigDecimal dailyReturn) {

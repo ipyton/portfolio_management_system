@@ -47,6 +47,33 @@ public class AssetStockDetailEntity {
     protected AssetStockDetailEntity() {
     }
 
+    public AssetStockDetailEntity(
+            AssetEntity asset,
+            String sector,
+            String industry,
+            Long marketCap,
+            BigDecimal peRatio
+    ) {
+        this.asset = asset;
+        this.assetId = asset == null ? null : asset.getId();
+        this.sector = sector;
+        this.industry = industry;
+        this.marketCap = marketCap;
+        this.peRatio = peRatio;
+    }
+
+    public void update(
+            String sector,
+            String industry,
+            Long marketCap,
+            BigDecimal peRatio
+    ) {
+        this.sector = sector;
+        this.industry = industry;
+        this.marketCap = marketCap;
+        this.peRatio = peRatio;
+    }
+
     public String getSector() {
         return sector;
     }

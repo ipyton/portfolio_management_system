@@ -8,11 +8,11 @@ export default function TradeModals({
   setTradeAmount,
   tradeCashAmount,
   setTradeCashAmount,
-  cashBalance,
+  cashBalanceDisplay,
   isOverBalance,
   isOverHolding,
-  stockCashValue,
-  calculatedCash,
+  stockCashValueDisplay,
+  calculatedCashDisplay,
   confirmation,
   setConfirmation,
   onConfirmTrade,
@@ -64,15 +64,12 @@ export default function TradeModals({
             )}
             {tradeModal.type === "buy" && (
               <p className="modal-cash">
-                Cash Available: ${cashBalance.toLocaleString()}
+                Cash Available: {cashBalanceDisplay || "N/A"}
               </p>
             )}
             {tradeModal.type === "sell" && selected?.type === "Stock" && (
               <p className="modal-cash">
-                Shares Owned: {selected.holdingShares || 0} · Value: $
-                {stockCashValue.toLocaleString(undefined, {
-                  maximumFractionDigits: 2,
-                })}
+                Shares Owned: {selected.holdingShares || 0} · Value: {stockCashValueDisplay || "N/A"}
               </p>
             )}
             <label className="modal-label" htmlFor="trade-amount">
@@ -123,10 +120,7 @@ export default function TradeModals({
             />
             {tradeAmount && selected?.type === "Stock" && (
               <p className="modal-cash">
-                Estimated Cash: $
-                {calculatedCash.toLocaleString(undefined, {
-                  maximumFractionDigits: 2,
-                })}
+                Estimated Cash: {calculatedCashDisplay || "N/A"}
               </p>
             )}
             <div className="modal-actions">

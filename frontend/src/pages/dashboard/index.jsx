@@ -19,9 +19,9 @@ export const dashboardPageMeta = {
   description:
     "This page is to display the general real-time information of the current portfolio.",
   metrics: [
-    { label: "Total Amount", value: "24", detail: "The total fund amount." },
-    { label: "Current Profit", value: "3", detail: "Profit" },
-    { label: "Ratio", value: "99.2%", detail: "live ratio of the current" },
+    { label: "Portfolio Value", value: "N/A", detail: "Holdings + cash" },
+    { label: "Today's P&L", value: "N/A", detail: "Mark-to-market" },
+    { label: "Total Return", value: "N/A", detail: "Since inception" },
   ],
 };
 
@@ -98,7 +98,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 const LIVE_DASHBOARD_API = import.meta.env.VITE_DASHBOARD_LIVE_API
-  || `/api/portfolio/dashboard?baseCurrency=CNY&userId=${DEFAULT_USER_ID}`;
+  || `/api/portfolio/dashboard?baseCurrency=USD&userId=${DEFAULT_USER_ID}`;
 const LIVE_POLLING_MS = 15000;
 
 const SPARK_POINTS = [0, 2140, 4870, 3620, 6310, 5480, 7920, 9250, 8100, 10640, 11380, 10820, 12480];
@@ -121,6 +121,7 @@ const DONUT_COLORS = [
   "#c084fc",
   "#fb7185",
 ];
+const MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA = 30;
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -128,30 +129,62 @@ function toNumber(value, fallback = 0) {
 }
 
 function normalizeHoldingRow(row) {
+  const shares = toNumber(row?.shares ?? row?.quantity, 0);
+  const marketValueUsd = Number(row?.marketValue);
+  const pnlUsd = Number(row?.unrealizedPnl);
+  const hasMarketValueUsd = Number.isFinite(marketValueUsd);
+  const hasPnlUsd = Number.isFinite(pnlUsd);
+  const currency = String(row?.currency || "").toUpperCase();
+  const nativePrice = toNumber(row?.currentPrice ?? row?.price ?? row?.latestPrice, Number.NaN);
+  const nativeCost = toNumber(row?.costBasis ?? row?.avgCost, Number.NaN);
+  const derivedPriceUsd = shares > 0 && hasMarketValueUsd ? marketValueUsd / shares : Number.NaN;
+  const derivedCostUsd = shares > 0 && hasMarketValueUsd && hasPnlUsd
+    ? (marketValueUsd - pnlUsd) / shares
+    : Number.NaN;
+
   return {
     symbol: String(row?.symbol ?? "").toUpperCase(),
     companyName: row?.companyName ?? row?.company ?? row?.name ?? "",
     label: row?.label ?? row?.industry ?? row?.assetType ?? "Other",
-    shares: toNumber(row?.shares ?? row?.quantity, 0),
-    currentPrice: toNumber(row?.currentPrice ?? row?.price ?? row?.latestPrice, 0),
-    costBasis: toNumber(row?.costBasis ?? row?.avgCost, 0),
+    shares,
+    currentPrice: Number.isFinite(derivedPriceUsd)
+      ? derivedPriceUsd
+      : (currency === "USD" ? nativePrice : Number.NaN),
+    costBasis: Number.isFinite(derivedCostUsd)
+      ? derivedCostUsd
+      : (currency === "USD" ? nativeCost : Number.NaN),
+    marketValue: hasMarketValueUsd ? marketValueUsd : Number.NaN,
+    pnl: hasPnlUsd ? pnlUsd : Number.NaN,
   };
 }
 
 function normalizeTradeRow(row, index) {
+  const quantity = toNumber(row?.shares ?? row?.quantity, 0);
+  const reportingAmount = Number(row?.reportingCurrencyAmount);
+  const currency = String(row?.currency || "").toUpperCase();
+  const nativePrice = toNumber(row?.price, Number.NaN);
+  const derivedPriceUsd = Number.isFinite(reportingAmount) && quantity > 0
+    ? Math.abs(reportingAmount) / quantity
+    : Number.NaN;
+  const fallbackTotal = toNumber(
+    row?.total
+    ?? row?.amount
+    ?? quantity * (Number.isFinite(nativePrice) ? nativePrice : 0),
+    Number.NaN,
+  );
+
   return {
     id: row?.id ?? row?.tradeId ?? `live-trade-${index}`,
     symbol: String(row?.symbol ?? "").toUpperCase(),
     side: row?.side ?? row?.tradeType ?? "N/A",
     companyName: row?.companyName ?? row?.company ?? row?.assetName ?? "",
-    shares: toNumber(row?.shares ?? row?.quantity, 0),
-    price: toNumber(row?.price, 0),
-    total: toNumber(
-      row?.total
-      ?? row?.reportingCurrencyAmount
-      ?? toNumber(row?.shares ?? row?.quantity, 0) * toNumber(row?.price, 0),
-      0,
-    ),
+    shares: quantity,
+    price: Number.isFinite(derivedPriceUsd)
+      ? derivedPriceUsd
+      : (currency === "USD" ? nativePrice : Number.NaN),
+    total: Number.isFinite(reportingAmount)
+      ? reportingAmount
+      : (currency === "USD" ? fallbackTotal : Number.NaN),
     date: row?.date ?? row?.tradedAt ?? "",
   };
 }
@@ -306,8 +339,15 @@ function buildLiveCategories(payload) {
   const trading = payload?.trading || {};
   const realtime = payload?.realtime || {};
   const metaSection = payload?.meta || {};
-  const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "CNY";
+  const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "USD";
   const asOf = payload?.asOf || "N/A";
+  const navObservationCount = Number(metaSection.navObservationCount);
+  const availablePortfolioReturns = Number.isFinite(navObservationCount)
+    ? Math.max(0, navObservationCount - 1)
+    : null;
+  const annualizedNeedsMoreHistory = performance.annualizedReturn == null
+    && availablePortfolioReturns !== null
+    && availablePortfolioReturns < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
 
   const realtimeHoldings = Array.isArray(realtime.holdings) ? realtime.holdings : [];
   const cashByCurrency = Array.isArray(realtime.cashByCurrency) ? realtime.cashByCurrency : [];
@@ -332,6 +372,19 @@ function buildLiveCategories(payload) {
   const sellCount = tradeRecords.filter((item) =>
     String(item?.tradeType || item?.side || "").toUpperCase() === "SELL",
   ).length;
+  const benchmarkComparisons = Array.isArray(performance.benchmarkComparisons)
+    ? performance.benchmarkComparisons
+    : [];
+  const primaryComparison = benchmarkComparisons.find((item) =>
+    String(item?.symbol || "").toUpperCase() === String(risk?.benchmarkSymbol || "").toUpperCase(),
+  ) || benchmarkComparisons[0];
+  const alphaObservationCount = Number(primaryComparison?.observationCount);
+  const alphaNeedsMoreHistory = risk.alpha == null
+    && Number.isFinite(alphaObservationCount)
+    && alphaObservationCount < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
+  const betaNeedsMoreHistory = risk.beta == null
+    && Number.isFinite(alphaObservationCount)
+    && alphaObservationCount < MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA;
 
   return [
     {
@@ -392,7 +445,9 @@ function buildLiveCategories(payload) {
           key: "annualizedReturn",
           label: "Annualized Return",
           value: formatSignedPercent(performance.annualizedReturn),
-          detail: "CAGR",
+          detail: annualizedNeedsMoreHistory
+            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} daily returns`
+            : "CAGR",
         },
         {
           key: "timeWeightedReturn",
@@ -430,13 +485,17 @@ function buildLiveCategories(payload) {
           key: "beta",
           label: "Beta",
           value: toFixed(risk.beta, 2),
-          detail: "vs benchmark",
+          detail: betaNeedsMoreHistory
+            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} overlapped returns`
+            : "vs benchmark",
         },
         {
           key: "alpha",
           label: "Alpha",
           value: formatSignedPercent(risk.alpha),
-          detail: "Annual excess",
+          detail: alphaNeedsMoreHistory
+            ? `Need >=${MIN_OBSERVATIONS_FOR_ANNUALIZED_AND_ALPHA} overlapped returns`
+            : "Annual excess",
         },
         {
           key: "riskFreeRate",
@@ -521,7 +580,7 @@ function buildLiveCategories(payload) {
 // ---------------------------------------------------
 
 // Dashboard Page.
-export default function DashboardPage({ meta = dashboardPageMeta, activityFeed = dashboardActivityFeed, isLoggedIn }) {
+export default function DashboardPage({ meta = dashboardPageMeta, activityFeed = dashboardActivityFeed }) {
   // Centralize dashboard state in index.jsx and pass it to presentational components.
   const [activeCategoryId, setActiveCategoryId] = useState(DEFAULT_CATEGORIES[0].id);
   const [selectedSymbol, setSelectedSymbol] = useState(null);
@@ -555,14 +614,32 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
   );
   const resolvedMeta = useMemo(() => {
     if (!dashboardPayload) {
-      return meta;
+      return {
+        ...meta,
+        metrics: [
+          {
+            label: "Portfolio Value",
+            value: "N/A",
+            detail: "Holdings + cash",
+          },
+          {
+            label: "Today's P&L",
+            value: "N/A",
+            detail: "Mark-to-market",
+          },
+          {
+            label: "Total Return",
+            value: "N/A",
+            detail: "Since inception",
+          },
+        ],
+      };
     }
 
     const realtime = dashboardPayload?.realtime || {};
     const performance = dashboardPayload?.performance || {};
-    const trading = dashboardPayload?.trading || {};
     const metaSection = dashboardPayload?.meta || {};
-    const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "CNY";
+    const reportingCurrency = metaSection.reportingCurrency || realtime.reportingCurrency || "USD";
     const totalValue = toNumber(realtime.holdingMarketValue, 0) + toNumber(realtime.cashBalance, 0);
 
     return {
@@ -582,7 +659,7 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         {
           label: "Total Return",
           value: formatSignedPercent(performance.totalReturn),
-          detail: `${toNumber(trading.tradeCount, 0)} trades logged`,
+          detail: "Since inception",
         },
       ],
     };
@@ -629,11 +706,8 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         message: "Backend data is unavailable right now.",
       };
     }
-    return {
-      heading: "Dashboard synced",
-      message: `Latest snapshot: ${dashboardPayload?.asOf || "N/A"}.`,
-    };
-  }, [isLiveLoading, liveDataUnavailable, dashboardPayload?.asOf]);
+    return null;
+  }, [isLiveLoading, liveDataUnavailable]);
 
   useEffect(() => {
     if (!categories.some((category) => category.id === activeCategoryId)) {
@@ -691,8 +765,12 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
 
   const enrichedHoldings = useMemo(() => {
     const withMetrics = liveHoldings.map((holding) => {
-      const marketValue = holding.shares * holding.currentPrice;
-      const pnl = marketValue - holding.shares * holding.costBasis;
+      const marketValue = Number.isFinite(Number(holding.marketValue))
+        ? Number(holding.marketValue)
+        : holding.shares * holding.currentPrice;
+      const pnl = Number.isFinite(Number(holding.pnl))
+        ? Number(holding.pnl)
+        : marketValue - holding.shares * holding.costBasis;
       return { ...holding, marketValue, pnl };
     });
     const totalMarketValue = withMetrics.reduce((sum, holding) => sum + holding.marketValue, 0);
@@ -718,7 +796,6 @@ export default function DashboardPage({ meta = dashboardPageMeta, activityFeed =
         <IntroCard
           meta={resolvedMeta}
           activityFeed={resolvedActivityFeed}
-          isLoggedIn={isLoggedIn}
           status={syncStatus}
           scrollActivity
         />

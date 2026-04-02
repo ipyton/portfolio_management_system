@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +31,7 @@ import org.springframework.util.StringUtils;
 
 import com.noah.portfolio.asset.client.FinnhubClient;
 import com.noah.portfolio.asset.repository.AssetPriceDailyRepository;
+import com.noah.portfolio.asset.service.AssetMetadataEnrichmentService;
 import com.noah.portfolio.fx.service.FxRateService;
 import com.noah.portfolio.scheduler.service.PortfolioNavSnapshotService;
 import com.noah.portfolio.trading.entity.HoldingEntity;
@@ -50,6 +52,9 @@ public class PortfolioAnalyticsService {
     private static final int DASHBOARD_NEWS_LIMIT = 3;
     private static final Duration NEWS_CACHE_TTL = Duration.ofMinutes(2);
     private static final Duration NAV_REBUILD_TTL = Duration.ofSeconds(30);
+    private static final double MAX_REASONABLE_DAILY_RETURN_ABS = 0.80;
+    private static final int MIN_OBSERVATIONS_FOR_ANNUALIZED_RETURN = 30;
+    private static final int MIN_OBSERVATIONS_FOR_BETA_ALPHA = 30;
 
     private final UserRepository userRepository;
     private final PortfolioNavDailyRepository portfolioNavDailyRepository;
@@ -61,6 +66,7 @@ public class PortfolioAnalyticsService {
     private final FxRateService fxRateService;
     private final FinnhubClient finnhubClient;
     private final PortfolioNavSnapshotService portfolioNavSnapshotService;
+    private final AssetMetadataEnrichmentService assetMetadataEnrichmentService;
     private volatile Instant cachedNewsAt;
     private volatile List<Map<String, Object>> cachedNews = List.of();
     private final Map<Long, Instant> navRebuildAtByUser = new ConcurrentHashMap<>();
@@ -75,7 +81,8 @@ public class PortfolioAnalyticsService {
             SystemConfigRepository systemConfigRepository,
             FxRateService fxRateService,
             FinnhubClient finnhubClient,
-            PortfolioNavSnapshotService portfolioNavSnapshotService
+            PortfolioNavSnapshotService portfolioNavSnapshotService,
+            AssetMetadataEnrichmentService assetMetadataEnrichmentService
     ) {
         this.userRepository = userRepository;
         this.portfolioNavDailyRepository = portfolioNavDailyRepository;
@@ -87,6 +94,7 @@ public class PortfolioAnalyticsService {
         this.fxRateService = fxRateService;
         this.finnhubClient = finnhubClient;
         this.portfolioNavSnapshotService = portfolioNavSnapshotService;
+        this.assetMetadataEnrichmentService = assetMetadataEnrichmentService;
     }
 
     public Map<String, Object> getDashboardSummary(Long requestedUserId, String requestedBenchmarkSymbol, String requestedBaseCurrency) {
@@ -96,6 +104,11 @@ public class PortfolioAnalyticsService {
         }
 
         maybeAutoRebuildTodaySnapshot(userId);
+        try {
+            assetMetadataEnrichmentService.enrichMissingStockMetadataForUser(userId);
+        } catch (RuntimeException ex) {
+            log.warn("Failed to enrich missing stock metadata for user {}.", userId, ex);
+        }
 
         List<NavPoint> navPoints = fetchNavPoints(userId);
         List<HoldingSnapshot> holdings = fetchHoldings(userId);
@@ -270,8 +283,11 @@ public class PortfolioAnalyticsService {
             return performance;
         }
         double totalReturn = computeTotalReturn(navPoints);
-        Double annualizedReturn = computeAnnualizedReturn(navPoints);
+        Double annualizedReturn = computeAnnualizedReturn(navPoints, portfolioReturns);
         Double timeWeightedReturn = computeTimeWeightedReturn(portfolioReturns);
+        if (!portfolioReturns.isEmpty()) {
+            totalReturn = computeTimeWeightedReturnValue(portfolioReturns);
+        }
 
         performance.put("totalReturn", roundOrNull(totalReturn, navPoints.isEmpty()));
         performance.put("annualizedReturn", annualizedReturn == null ? null : round(annualizedReturn));
@@ -378,13 +394,17 @@ public class PortfolioAnalyticsService {
         }
 
         Double annualizedVolatility = computeAnnualizedVolatility(portfolioReturns);
-        Double annualizedReturn = computeAnnualizedReturn(navPoints);
+        Double annualizedReturn = computeAnnualizedReturn(navPoints, portfolioReturns);
         Double sharpeRatio = annualizedVolatility == null || annualizedReturn == null || almostZero(annualizedVolatility)
                 ? null
                 : (annualizedReturn - riskFreeRate) / annualizedVolatility;
+        Double maxDrawdown = computeMaxDrawdownFromReturns(portfolioReturns);
+        if (maxDrawdown == null && !navPoints.isEmpty()) {
+            maxDrawdown = computeMaxDrawdown(navPoints);
+        }
 
         risk.put("annualizedVolatility", annualizedVolatility == null ? null : round(annualizedVolatility));
-        risk.put("maxDrawdown", navPoints.isEmpty() ? null : round(computeMaxDrawdown(navPoints)));
+        risk.put("maxDrawdown", maxDrawdown == null ? null : round(maxDrawdown));
         risk.put("sharpeRatio", sharpeRatio == null ? null : round(sharpeRatio));
         risk.put("riskFreeRate", round(riskFreeRate));
         risk.put("beta", primaryBenchmarkMetrics == null ? null : primaryBenchmarkMetrics.get("beta"));
@@ -405,7 +425,7 @@ public class PortfolioAnalyticsService {
         holdingsSection.put("assetClassDistribution", buildAssetClassDistribution(holdings, cashBalances, totalPortfolioValue, reportingCurrency));
         holdingsSection.put("industryDistribution", buildDistribution(
                 holdings,
-                HoldingSnapshot::industry,
+                this::resolveIndustryBucket,
                 totalHoldingMarketValue,
                 reportingCurrency
         ));
@@ -789,7 +809,11 @@ public class PortfolioAnalyticsService {
                             holding.getAsset().getName(),
                             holding.getAsset().getAssetType().name(),
                             holding.getAsset().getCurrency(),
-                            textOrDefault(holding.getAsset().getRegion(), "UNKNOWN"),
+                            resolveHoldingRegion(
+                                    holding.getAsset().getRegion(),
+                                    holding.getAsset().getSymbol(),
+                                    holding.getAsset().getExchange()
+                            ),
                             holding.getAsset().getStockDetail() == null ? "UNKNOWN" : textOrDefault(holding.getAsset().getStockDetail().getSector(), "UNKNOWN"),
                             holding.getAsset().getStockDetail() == null ? "UNKNOWN" : textOrDefault(holding.getAsset().getStockDetail().getIndustry(), "UNKNOWN"),
                             quantity,
@@ -962,15 +986,33 @@ public class PortfolioAnalyticsService {
     private List<ReturnPoint> buildPortfolioReturnSeries(List<NavPoint> navPoints) {
         List<ReturnPoint> returns = new ArrayList<>();
         NavPoint previous = null;
+        int skippedExtreme = 0;
+        LocalDate firstSkippedDate = null;
         for (NavPoint navPoint : navPoints) {
             Double dailyReturn = navPoint.dailyReturn();
             if (dailyReturn == null && previous != null && previous.netValue() > EPSILON) {
                 dailyReturn = navPoint.netValue() / previous.netValue() - 1;
             }
-            if (dailyReturn != null) {
+            if (dailyReturn != null && Double.isFinite(dailyReturn)) {
+                if (Math.abs(dailyReturn) > MAX_REASONABLE_DAILY_RETURN_ABS) {
+                    skippedExtreme++;
+                    if (firstSkippedDate == null) {
+                        firstSkippedDate = navPoint.navDate();
+                    }
+                    previous = navPoint;
+                    continue;
+                }
                 returns.add(new ReturnPoint(navPoint.navDate(), dailyReturn));
             }
             previous = navPoint;
+        }
+        if (skippedExtreme > 0) {
+            log.debug(
+                    "Filtered {} extreme portfolio daily return points (abs>{}) starting from {}.",
+                    skippedExtreme,
+                    MAX_REASONABLE_DAILY_RETURN_ABS,
+                    firstSkippedDate
+            );
         }
         return returns;
     }
@@ -1016,6 +1058,13 @@ public class PortfolioAnalyticsService {
             return computeAnnualizedReturn(first.navDate(), last.navDate(), first.totalValue(), last.totalValue());
         }
         return null;
+    }
+
+    private Double computeAnnualizedReturn(List<NavPoint> navPoints, List<ReturnPoint> returnPoints) {
+        if (!returnPoints.isEmpty()) {
+            return computeAnnualizedReturnFromReturns(returnPoints);
+        }
+        return computeAnnualizedReturn(navPoints);
     }
 
     private Double computeAnnualizedReturn(LocalDate startDate, LocalDate endDate, double startValue, double endValue) {
@@ -1084,7 +1133,7 @@ public class PortfolioAnalyticsService {
     }
 
     private Double computeBeta(List<Double> alignedPortfolio, List<Double> alignedBenchmark) {
-        if (alignedPortfolio.size() < 2 || alignedPortfolio.size() != alignedBenchmark.size()) {
+        if (alignedPortfolio.size() < MIN_OBSERVATIONS_FOR_BETA_ALPHA || alignedPortfolio.size() != alignedBenchmark.size()) {
             return null;
         }
 
@@ -1108,14 +1157,14 @@ public class PortfolioAnalyticsService {
     }
 
     private Double computeAnnualizedReturnFromReturns(List<ReturnPoint> returnPoints) {
-        if (returnPoints.isEmpty()) {
+        if (returnPoints.size() < MIN_OBSERVATIONS_FOR_ANNUALIZED_RETURN) {
             return null;
         }
         return computeAnnualizedReturnFromDailyReturns(returnPoints.stream().map(ReturnPoint::dailyReturn).toList());
     }
 
     private Double computeAnnualizedReturnFromDailyReturns(List<Double> dailyReturns) {
-        if (dailyReturns.isEmpty()) {
+        if (dailyReturns.size() < MIN_OBSERVATIONS_FOR_ANNUALIZED_RETURN) {
             return null;
         }
         Double twr = computeTimeWeightedReturnFromDailyReturns(dailyReturns);
@@ -1124,6 +1173,24 @@ public class PortfolioAnalyticsService {
         }
         int count = dailyReturns.size();
         return Math.pow(1 + twr, TRADING_DAYS_PER_YEAR / count) - 1;
+    }
+
+    private Double computeMaxDrawdownFromReturns(List<ReturnPoint> returnPoints) {
+        if (returnPoints.isEmpty()) {
+            return null;
+        }
+        double equityCurve = 1.0;
+        double peak = 1.0;
+        double maxDrawdown = 0.0;
+        for (ReturnPoint point : returnPoints) {
+            equityCurve = equityCurve * (1 + point.dailyReturn());
+            peak = Math.max(peak, equityCurve);
+            if (peak > EPSILON) {
+                double drawdown = (equityCurve - peak) / peak;
+                maxDrawdown = Math.min(maxDrawdown, drawdown);
+            }
+        }
+        return maxDrawdown;
     }
 
     private Double computeTodayPnl(
@@ -1172,6 +1239,16 @@ public class PortfolioAnalyticsService {
                 .orElse("US");
     }
 
+    private String resolveIndustryBucket(HoldingSnapshot holding) {
+        if (StringUtils.hasText(holding.industry()) && !"UNKNOWN".equalsIgnoreCase(holding.industry())) {
+            return holding.industry();
+        }
+        if (StringUtils.hasText(holding.sector()) && !"UNKNOWN".equalsIgnoreCase(holding.sector())) {
+            return holding.sector();
+        }
+        return "UNKNOWN";
+    }
+
     private LocalDate resolveAsOfDate(List<NavPoint> navPoints, List<HoldingSnapshot> holdings) {
         LocalDate navAsOf = navPoints.isEmpty() ? null : navPoints.get(navPoints.size() - 1).navDate();
         LocalDate marketAsOf = holdings.stream()
@@ -1192,6 +1269,73 @@ public class PortfolioAnalyticsService {
         return switch (dominantRegion) {
             case "CN" -> "CNY";
             default -> "USD";
+        };
+    }
+
+    private String resolveHoldingRegion(String rawRegion, String symbol, String exchange) {
+        if (StringUtils.hasText(rawRegion) && !"UNKNOWN".equalsIgnoreCase(rawRegion.trim())) {
+            return rawRegion.trim().toUpperCase(Locale.ROOT);
+        }
+        String inferredBySymbol = inferRegionFromSymbol(symbol);
+        if (StringUtils.hasText(inferredBySymbol)) {
+            return inferredBySymbol;
+        }
+        String inferredByExchange = inferRegionFromExchange(exchange);
+        return StringUtils.hasText(inferredByExchange) ? inferredByExchange : "US";
+    }
+
+    private String inferRegionFromSymbol(String symbol) {
+        if (!StringUtils.hasText(symbol)) {
+            return null;
+        }
+        String upper = symbol.trim().toUpperCase(Locale.ROOT);
+        if (upper.endsWith(".SH") || upper.endsWith(".SZ") || upper.endsWith(".SS") || "SSEC".equals(upper) || "000300.SH".equals(upper)) {
+            return "CN";
+        }
+        if (upper.endsWith(".HK") || "HSI".equals(upper)) {
+            return "HK";
+        }
+        if ("N225".equals(upper)) {
+            return "JP";
+        }
+        if ("FTSE".equals(upper)) {
+            return "UK";
+        }
+        if ("GDAXI".equals(upper)) {
+            return "DE";
+        }
+        if ("FCHI".equals(upper)) {
+            return "FR";
+        }
+        if ("AXJO".equals(upper)) {
+            return "AU";
+        }
+        if ("BSESN".equals(upper) || "NSEI".equals(upper)) {
+            return "IN";
+        }
+        if ("KS11".equals(upper)) {
+            return "KR";
+        }
+        if ("TSX".equals(upper)) {
+            return "CA";
+        }
+        return null;
+    }
+
+    private String inferRegionFromExchange(String exchange) {
+        if (!StringUtils.hasText(exchange)) {
+            return null;
+        }
+        String upper = exchange.trim().toUpperCase(Locale.ROOT);
+        return switch (upper) {
+            case "SSE", "SZSE" -> "CN";
+            case "HKEX" -> "HK";
+            case "LSE" -> "UK";
+            case "TSE" -> "JP";
+            case "NSE", "BSE" -> "IN";
+            case "TSX" -> "CA";
+            case "NYSE", "NASDAQ", "AMEX", "INDEX" -> "US";
+            default -> null;
         };
     }
 

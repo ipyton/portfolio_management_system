@@ -1,12 +1,9 @@
 import React from "react";
 
-export default function IntroCard({ meta, activityFeed, isLoggedIn, status, scrollActivity = false }) {
-  const statusHeading = status?.heading
-    || (isLoggedIn ? "Workflow oversight is active" : "Previewing board");
-  const statusMessage = status?.message
-    || (isLoggedIn
-      ? "Use this page to watch approvals, queues, and ingestion health in one place."
-      : "Guest mode keeps the interface visible while live actions stay disabled.");
+export default function IntroCard({ meta, activityFeed, status, scrollActivity = false }) {
+  const statusHeading = String(status?.heading || "").trim();
+  const statusMessage = String(status?.message || "").trim();
+  const showStatusCard = Boolean(statusHeading || statusMessage);
 
   // Render the reserved top introduction panel.
   return (
@@ -17,10 +14,12 @@ export default function IntroCard({ meta, activityFeed, isLoggedIn, status, scro
           <h1>{meta.title}</h1>
           <p className="hero-copy">{meta.description}</p>
         </div>
-        <div className="hero-status-card">
-          <strong>{statusHeading}</strong>
-          <p>{statusMessage}</p>
-        </div>
+        {showStatusCard && (
+          <div className="hero-status-card">
+            <strong>{statusHeading}</strong>
+            <p>{statusMessage}</p>
+          </div>
+        )}
       </div>
       <div className="hero-metrics">
         {meta.metrics.map((metric) => (
