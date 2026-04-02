@@ -641,7 +641,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
       const usdPrice = toUsdAmount(normalizedPrice, selected?.currency);
       const displayPrice = usdPrice === null ? "N/A" : formatCurrency(usdPrice, USD_CURRENCY);
       setConfirmation(
-        `${selected.symbol} ${side} order submitted: ${normalizedQuantity.toFixed(4)} shares @ ${displayPrice}.`,
+        `${selected.symbol} ${side} order submitted:\n${normalizedQuantity.toFixed(4)} shares\nTotal: $${normalizedPrice.toFixed(4)}.`,
       );
       setTradeModal({ open: false, type: null });
       setTradeAmount("");
