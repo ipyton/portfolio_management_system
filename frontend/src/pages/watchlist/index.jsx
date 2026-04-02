@@ -602,7 +602,7 @@ export default function WatchlistPage({ isLoggedIn = true }) {
 
       const side = tradeModal.type === "buy" ? "buy" : "sell";
       setConfirmation(
-        `${selected.symbol} ${side} order submitted: ${normalizedQuantity.toFixed(4)} shares @ ${normalizedPrice.toFixed(4)}.`,
+        `${selected.symbol} ${side} order submitted:\n${normalizedQuantity.toFixed(4)} shares\nTotal: $${normalizedPrice.toFixed(4)}.`,
       );
       setTradeModal({ open: false, type: null });
       setTradeAmount("");
